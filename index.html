@@ -1578,11 +1578,9 @@
       txs.forEach(t => {
         const desc = t.description || '';
         let label = 'Other';
-        // Prefer trained / built-in rule labels that belong to this category
         const matched = matchBudgetRule(desc, t.entityId);
         if (matched && matched.category === cat) label = matched.label;
         else {
-          // Fallback heuristics for common utility splits even if category was set manually
           const d = desc.toLowerCase();
           if (cat === 'Utilities') {
             if (/\b(synergy|alinta|agl|origin energy|simply energy|electric|power)\b/.test(d)) label = 'Electricity';
@@ -1611,12 +1609,14 @@
             if (/\bplenti|car loan|vehicle\b/.test(d)) label = 'Vehicle / car loan';
           }
         }
-        if (!buckets[label]) buckets[label] = { label, amount: 0, count: 0 };
+        if (!buckets[label]) buckets[label] = { label, amount: 0, count: 0, txs: [] };
         buckets[label].amount += t.amount;
         buckets[label].count += 1;
+        buckets[label].txs.push(t);
       });
       return Object.values(buckets).sort((a,b) => b.amount - a.amount);
     }
+
 
     function renderBudgets() {
       const list = document.getElementById('budgetsList');
@@ -1694,11 +1694,17 @@
         if (open && canExpand) {
           const subs = budgetSubBreakdown(r.cat, monthKey, f);
           if (!subs.length) {
-            subHtml = `<div class="budget-sub"><p class="budget-sub-muted">Nothing tagged under ${escapeHtml(r.cat)} this month.</p></div>`;
+            subHtml = `<div class="budget-sub"><p class="budget-sub-muted">Nothing tagged under ${escapeHtml(r.cat)} this month. Fix categories in Spend → Review, then come back.</p></div>`;
           } else {
-            subHtml = `<div class="budget-sub">` + subs.map(s => {
+            subHtml = `<div class="budget-sub"><p class="budget-sub-muted mb-2">Tap a transaction to edit / retag. Use Train rule for repeating merchants.</p>` + subs.map(s => {
               const share = r.spent > 0 ? ((s.amount / r.spent) * 100).toFixed(0) : '0';
-              return `<div class="budget-sub-row"><span class="sub-label">${escapeHtml(s.label)} <span class="text-muted">×${s.count}</span></span><span><strong>${formatAUD(s.amount)}</strong> <span class="text-muted">${share}%</span></span></div>`;
+              const txLines = [...s.txs].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(t => {
+                return `<div class="budget-tx" onclick="event.stopPropagation(); editTransaction('${t.id}')"><span class="budget-tx-main"><span class="budget-tx-date">${escapeHtml(t.date||'')}</span> ${escapeHtml(t.description||'')}</span><span class="budget-tx-amt">${formatAUD(Math.abs(t.amount))}</span></div>`;
+              }).join('');
+              return `<div class="budget-sub-group">
+                <div class="budget-sub-row"><span class="sub-label">${escapeHtml(s.label)} <span class="text-muted">×${s.count}</span></span><span><strong>${formatAUD(s.amount)}</strong> <span class="text-muted">${share}%</span></span></div>
+                <div class="budget-tx-list">${txLines}</div>
+              </div>`;
             }).join('') + `</div>`;
           }
         }
