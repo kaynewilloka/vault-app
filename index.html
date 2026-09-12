@@ -69,6 +69,20 @@
     .list-item-title { font-weight: 600; font-size: 0.95rem; }
     .list-item-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
     .list-item-value { text-align: right; font-weight: 600; white-space: nowrap; }
+
+    .budget-summary { margin-bottom: 16px; }
+    .budget-compare { height: 14px; border-radius: 7px; background: var(--bg); overflow: hidden; display: flex; margin: 10px 0 4px; }
+    .budget-compare .seg-spent { background: var(--accent); }
+    .budget-compare .seg-left { background: rgba(34,197,94,0.35); }
+    .budget-compare .seg-over { background: var(--negative); }
+    .budget-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+    .budget-row:last-child { border-bottom: none; }
+    .budget-row .pct { font-size: 0.75rem; color: var(--text-muted); }
+    .progress-fill { height: 100%; border-radius: 4px; background: var(--accent); min-width: 0; }
+    .progress-fill.good { background: var(--positive); }
+    .progress-fill.warn { background: var(--warning); }
+    .progress-fill.over { background: var(--negative); }
+    .progress-fill.zero { background: var(--border); min-width: 4px; }
     .progress-wrap { margin-top: 8px; }
     .progress-bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
     .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
@@ -289,16 +303,17 @@
     <section id="budgets" class="section">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">Monthly Budgets</div>
-          <div class="flex gap-2">
-            <button class="btn btn-secondary btn-sm" onclick="suggestBudgetsFromTransactions()">Suggest from bills</button>
-            <button class="btn btn-secondary btn-sm" onclick="openTrainBudgetModal()">Train rule</button>
-            <button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Edit</button>
-          </div>
+          <div class="card-title">Budget plan</div>
+          <select id="budgetMonthFilter" class="btn btn-secondary btn-sm" onchange="renderBudgets()" style="max-width:150px;padding:6px 8px;"></select>
         </div>
-        <p class="text-sm text-muted mb-2">Suggest pulls clear repeats into budgets. Train teaches Vault (e.g. “plenti” → Vehicle) so it stops guessing mortgage/rent. Your rules win over built-ins.</p>
+        <div class="flex gap-2 mb-2" style="flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="suggestBudgetsFromTransactions()">Suggest from bills</button>
+          <button class="btn btn-secondary btn-sm" onclick="openTrainBudgetModal()">Train rule</button>
+          <button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Edit limits</button>
+        </div>
         <div id="budgetSuggestStatus" class="status-msg text-muted"></div>
         <div id="budgetTrainingList" class="mb-2"></div>
+        <div id="budgetSummary" class="budget-summary"></div>
         <div id="budgetsList"></div>
       </div>
     </section>
@@ -1538,23 +1553,83 @@
     }
 
     function renderBudgets() {
-      const monthKey = currentMonthKey();
       const list = document.getElementById('budgetsList');
+      const summary = document.getElementById('budgetSummary');
       const f = data.settings.currentEntity;
-      const cats = data.categories.filter(c => c !== 'Income');
-      let html = '';
+      const months = new Set();
+      data.transactions.forEach(t => { if (t.date) months.add(t.date.slice(0,7)); });
+      months.add(currentMonthKey());
+      const sortedMonths = [...months].sort().reverse();
+      const filter = document.getElementById('budgetMonthFilter');
+      let monthKey = (filter && filter.value) || currentMonthKey();
+      if (filter) {
+        if (!sortedMonths.includes(monthKey)) monthKey = currentMonthKey();
+        filter.innerHTML = sortedMonths.map(m => {
+          const [y, mo] = m.split('-');
+          return `<option value="${m}" ${m===monthKey?'selected':''}>${new Date(y, mo-1).toLocaleString('en-AU',{month:'long',year:'numeric'})}</option>`;
+        }).join('');
+        monthKey = filter.value || monthKey;
+      }
+
+      const period = { mode: 'month', monthKey, start: monthKey+'-01', end: monthKey+'-31', label: monthKey };
+      const cf = calcCashflow(period, true);
+
+      const rows = [];
+      const cats = data.categories.filter(c => c !== 'Income' && c !== 'Salary');
       cats.forEach(cat => {
         let limit = 0;
         if (f === 'all') Object.keys(data.budgets).forEach(k => { if (k.endsWith('|'+cat)) limit += Number(data.budgets[k])||0; });
         else limit = Number(data.budgets[f+'|'+cat]) || 0;
         if (limit <= 0) return;
         const spent = data.transactions.filter(t => t.date && t.date.startsWith(monthKey) && t.category===cat && t.amount>0 && (f==='all'||t.entityId===f)).reduce((s,t)=>s+t.amount,0);
-        const pct = Math.min(100, (spent/limit)*100);
-        const remaining = limit - spent;
-        let fillClass = pct >= 90 ? 'over' : pct >= 70 ? 'warn' : 'good';
-        html += `<div style="margin-bottom:16px;"><div class="flex justify-between items-center"><div class="list-item-title">${escapeHtml(cat)}</div><div class="text-sm">${formatAUD(spent)} / ${formatAUD(limit)}</div></div><div class="progress-wrap"><div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div></div><div class="text-sm text-muted mt-1">${remaining>=0 ? formatAUD(remaining)+' left' : formatAUD(Math.abs(remaining))+' over'}</div></div>`;
+        rows.push({ cat, limit, spent, remaining: limit - spent, pct: limit > 0 ? (spent/limit)*100 : 0 });
       });
-      list.innerHTML = html || '<div class="empty"><p>No budgets set for this view.</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Set budgets</button></div></div>';
+      rows.sort((a,b) => b.pct - a.pct || b.limit - a.limit);
+
+      const totalBudget = rows.reduce((s,r) => s + r.limit, 0);
+      const totalSpentInBudget = rows.reduce((s,r) => s + r.spent, 0);
+      const unbudgetedSpend = Math.max(0, cf.expenses - totalSpentInBudget);
+      const budgetLeft = totalBudget - totalSpentInBudget;
+      const planGap = cf.income - totalBudget; // income vs planned spend
+      const actualGap = cf.surplus; // income vs actual expenses (excl transfers)
+
+      if (summary) {
+        const spentPct = totalBudget > 0 ? Math.min(100, (totalSpentInBudget/totalBudget)*100) : 0;
+        const over = totalSpentInBudget > totalBudget;
+        summary.innerHTML = `
+          <div class="metric-grid">
+            <div class="metric"><div class="metric-label">Income</div><div class="metric-value positive">${formatAUD(cf.income)}</div></div>
+            <div class="metric"><div class="metric-label">Budgeted</div><div class="metric-value">${formatAUD(totalBudget)}</div></div>
+            <div class="metric"><div class="metric-label">Spent (in budget)</div><div class="metric-value negative">${formatAUD(totalSpentInBudget)}</div></div>
+            <div class="metric"><div class="metric-label">${budgetLeft>=0?'Left in plan':'Over plan'}</div><div class="metric-value ${budgetLeft>=0?'positive':'negative'}">${formatAUD(Math.abs(budgetLeft))}</div></div>
+          </div>
+          <div class="budget-compare" title="Spent vs budget">
+            <div class="seg-spent" style="width:${over?100:spentPct}%"></div>
+            ${over?'':`<div class="seg-left" style="width:${100-spentPct}%"></div>`}
+          </div>
+          <p class="text-sm text-muted">Plan vs income: <strong class="${planGap>=0?'positive':'negative'}">${planGap>=0?'+':'-'}${formatAUD(Math.abs(planGap))}</strong> · Actual cash surplus: <strong class="${actualGap>=0?'positive':'negative'}">${actualGap>=0?'+':'-'}${formatAUD(Math.abs(actualGap))}</strong>${unbudgetedSpend>0?` · Uncategorised/other spend ${formatAUD(unbudgetedSpend)}`:''}</p>
+          ${totalSpentInBudget===0 && totalBudget>0 ? `<p class="text-sm text-muted mt-1">No spending hit these budget categories yet this month — fix categories in <button type="button" class="btn btn-secondary btn-sm" onclick="showSection('spending')">Spend → Review</button></p>` : ''}
+        `;
+      }
+
+      if (!rows.length) {
+        list.innerHTML = '<div class="empty"><p>No budget limits set for this entity.</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Edit limits</button><button class="btn btn-secondary btn-sm" onclick="suggestBudgetsFromTransactions()">Suggest from bills</button></div></div>';
+        return;
+      }
+
+      list.innerHTML = '<div class="card-title mb-2">By category</div>' + rows.map(r => {
+        const pctShow = Math.min(100, r.pct);
+        const fillClass = r.spent <= 0 ? 'zero' : r.pct >= 100 ? 'over' : r.pct >= 80 ? 'warn' : 'good';
+        const status = r.spent <= 0 ? 'No spend tagged yet' : (r.remaining >= 0 ? formatAUD(r.remaining) + ' left' : formatAUD(Math.abs(r.remaining)) + ' over');
+        return `<div class="budget-row">
+          <div class="flex justify-between items-center">
+            <div class="list-item-title">${escapeHtml(r.cat)}</div>
+            <div class="text-sm"><strong>${formatAUD(r.spent)}</strong> <span class="text-muted">/ ${formatAUD(r.limit)}</span> <span class="pct">${r.pct.toFixed(0)}%</span></div>
+          </div>
+          <div class="progress-wrap"><div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${Math.max(r.spent<=0?2:0, pctShow)}%"></div></div></div>
+          <div class="text-sm text-muted mt-1">${status}</div>
+        </div>`;
+      }).join('');
     }
 
     function renderEntitiesList() {
