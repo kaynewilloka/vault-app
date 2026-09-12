@@ -76,6 +76,15 @@
     .budget-compare .seg-left { background: rgba(34,197,94,0.35); }
     .budget-compare .seg-over { background: var(--negative); }
     .budget-row { padding: 12px 0; border-bottom: 1px solid var(--border); }
+
+    .budget-row { cursor: pointer; }
+    .budget-row .chev { display:inline-block; transition: transform .15s; margin-right:6px; color: var(--text-muted); }
+    .budget-row.open .chev { transform: rotate(90deg); }
+    .budget-sub { margin: 8px 0 4px 18px; padding: 8px 10px; background: var(--bg-elevated); border-radius: 8px; }
+    .budget-sub-row { display:flex; justify-content:space-between; gap:12px; font-size:0.85rem; padding:4px 0; }
+    .budget-sub-row .sub-label { color: var(--text); }
+    .budget-sub-muted { color: var(--text-muted); font-size:0.75rem; margin-top:4px; }
+
     .budget-row:last-child { border-bottom: none; }
     .budget-row .pct { font-size: 0.75rem; color: var(--text-muted); }
     .progress-fill { height: 100%; border-radius: 4px; background: var(--accent); min-width: 0; }
@@ -1552,6 +1561,63 @@
       if (status) status.textContent = `Applied ${suggestions.length} budget line(s) from bills.`;
     }
 
+
+    let budgetExpanded = {};
+
+    function toggleBudgetRow(cat) {
+      budgetExpanded[cat] = !budgetExpanded[cat];
+      renderBudgets();
+    }
+
+    function budgetSubBreakdown(cat, monthKey, entityFilter) {
+      const txs = data.transactions.filter(t =>
+        t.date && t.date.startsWith(monthKey) && t.amount > 0 &&
+        t.category === cat && (entityFilter === 'all' || t.entityId === entityFilter)
+      );
+      const buckets = {};
+      txs.forEach(t => {
+        const desc = t.description || '';
+        let label = 'Other';
+        // Prefer trained / built-in rule labels that belong to this category
+        const matched = matchBudgetRule(desc, t.entityId);
+        if (matched && matched.category === cat) label = matched.label;
+        else {
+          // Fallback heuristics for common utility splits even if category was set manually
+          const d = desc.toLowerCase();
+          if (cat === 'Utilities') {
+            if (/\b(synergy|alinta|agl|origin energy|simply energy|electric|power)\b/.test(d)) label = 'Electricity';
+            else if (/\b(kleenheat|gas)\b/.test(d) && !/\b(fuel|petrol|diesel)\b/.test(d)) label = 'Gas';
+            else if (/\b(water corporation|watercorp|water)\b/.test(d)) label = 'Water';
+            else if (/\b(nbn|aussie broadband|tpg|iinet|superloop|internet)\b/.test(d)) label = 'Internet / NBN';
+          } else if (cat === 'Housing') {
+            if (/\b(loan payment|mortgage|home\s*loan)\b/.test(d)) label = 'Mortgage / loan';
+            else if (/\brent\b/.test(d)) label = 'Rent';
+            else if (/\brates|council\b/.test(d)) label = 'Council rates';
+          } else if (cat === 'Health') {
+            if (/\bgym|fitness\b/.test(d)) label = 'Gym / fitness';
+            else if (/\bclinical|pathology|chemist|doctor|dental|physio|hospital\b/.test(d)) label = 'Clinical / medical';
+          } else if (cat === 'Subscriptions') {
+            if (/\bnetflix|spotify|disney|stan|prime|youtube|apple\.com\b/.test(d)) label = 'Streaming / subs';
+            else if (/\bxero|adobe|microsoft|canva|notion\b/.test(d)) label = 'Software / tools';
+          } else if (cat === 'Transport') {
+            if (/\brego|toll|linkt|eastlink\b/.test(d)) label = 'Car / rego / tolls';
+          } else if (cat === 'Insurance') {
+            label = 'Insurance';
+          } else if (cat === 'Fuel') {
+            label = 'Fuel / servo';
+          } else if (cat === 'Phone') {
+            label = 'Phone';
+          } else if (cat === 'Vehicle') {
+            if (/\bplenti|car loan|vehicle\b/.test(d)) label = 'Vehicle / car loan';
+          }
+        }
+        if (!buckets[label]) buckets[label] = { label, amount: 0, count: 0 };
+        buckets[label].amount += t.amount;
+        buckets[label].count += 1;
+      });
+      return Object.values(buckets).sort((a,b) => b.amount - a.amount);
+    }
+
     function renderBudgets() {
       const list = document.getElementById('budgetsList');
       const summary = document.getElementById('budgetSummary');
@@ -1617,17 +1683,34 @@
         return;
       }
 
-      list.innerHTML = '<div class="card-title mb-2">By category</div>' + rows.map(r => {
+      const expandableCats = new Set(['Utilities','Housing','Health','Subscriptions','Transport','Insurance','Fuel','Phone','Vehicle','Food','Tools','Materials']);
+      list.innerHTML = '<div class="card-title mb-2">By category <span class="text-muted text-sm">(tap to expand)</span></div>' + rows.map(r => {
         const pctShow = Math.min(100, r.pct);
         const fillClass = r.spent <= 0 ? 'zero' : r.pct >= 100 ? 'over' : r.pct >= 80 ? 'warn' : 'good';
         const status = r.spent <= 0 ? 'No spend tagged yet' : (r.remaining >= 0 ? formatAUD(r.remaining) + ' left' : formatAUD(Math.abs(r.remaining)) + ' over');
-        return `<div class="budget-row">
+        const canExpand = expandableCats.has(r.cat) || r.spent > 0;
+        const open = !!budgetExpanded[r.cat];
+        let subHtml = '';
+        if (open && canExpand) {
+          const subs = budgetSubBreakdown(r.cat, monthKey, f);
+          if (!subs.length) {
+            subHtml = `<div class="budget-sub"><p class="budget-sub-muted">Nothing tagged under ${escapeHtml(r.cat)} this month.</p></div>`;
+          } else {
+            subHtml = `<div class="budget-sub">` + subs.map(s => {
+              const share = r.spent > 0 ? ((s.amount / r.spent) * 100).toFixed(0) : '0';
+              return `<div class="budget-sub-row"><span class="sub-label">${escapeHtml(s.label)} <span class="text-muted">×${s.count}</span></span><span><strong>${formatAUD(s.amount)}</strong> <span class="text-muted">${share}%</span></span></div>`;
+            }).join('') + `</div>`;
+          }
+        }
+        const chev = canExpand ? `<span class="chev">${open ? '▼' : '▶'}</span>` : '';
+        return `<div class="budget-row ${open?'open':''}" ${canExpand?`onclick="toggleBudgetRow('${r.cat.replace(/'/g, "\\'")}')"`:''}>
           <div class="flex justify-between items-center">
-            <div class="list-item-title">${escapeHtml(r.cat)}</div>
+            <div class="list-item-title">${chev}${escapeHtml(r.cat)}</div>
             <div class="text-sm"><strong>${formatAUD(r.spent)}</strong> <span class="text-muted">/ ${formatAUD(r.limit)}</span> <span class="pct">${r.pct.toFixed(0)}%</span></div>
           </div>
           <div class="progress-wrap"><div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${Math.max(r.spent<=0?2:0, pctShow)}%"></div></div></div>
-          <div class="text-sm text-muted mt-1">${status}</div>
+          <div class="text-sm text-muted mt-1">${status}${canExpand && !open ? ' · tap for breakdown' : ''}</div>
+          ${subHtml}
         </div>`;
       }).join('');
     }
