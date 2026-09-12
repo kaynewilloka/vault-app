@@ -216,11 +216,13 @@
           <div class="card-title">Monthly Budgets</div>
           <div class="flex gap-2">
             <button class="btn btn-secondary btn-sm" onclick="suggestBudgetsFromTransactions()">Suggest from bills</button>
+            <button class="btn btn-secondary btn-sm" onclick="openTrainBudgetModal()">Train rule</button>
             <button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Edit</button>
           </div>
         </div>
-        <p class="text-sm text-muted mb-2">Suggest pulls clear repeats — power, gas, water, internet, phone, mortgage/rent, insurance, streaming, gym, fuel, and similar — into monthly budgets. You confirm before anything is saved.</p>
+        <p class="text-sm text-muted mb-2">Suggest pulls clear repeats into budgets. Train teaches Vault (e.g. “plenti” → Vehicle) so it stops guessing mortgage/rent. Your rules win over built-ins.</p>
         <div id="budgetSuggestStatus" class="status-msg text-muted"></div>
+        <div id="budgetTrainingList" class="mb-2"></div>
         <div id="budgetsList"></div>
       </div>
     </section>
@@ -386,6 +388,25 @@
     </div>
   </div>
 
+
+  <!-- Train Budget Rule Modal -->
+  <div class="modal-overlay" id="trainBudgetModal">
+    <div class="modal">
+      <div class="modal-header"><div class="modal-title">Train budget rule</div><button class="close-btn" onclick="closeModal('trainBudgetModal')">×</button></div>
+      <p class="text-sm text-muted mb-2">If a description contains this text, treat it as this category when suggesting budgets (and you can apply it to matching transactions).</p>
+      <form id="trainBudgetForm" onsubmit="saveTrainBudgetRule(event)">
+        <div class="form-group"><label>Description contains</label><input type="text" id="trainMatch" placeholder="e.g. plenti" required /></div>
+        <div class="form-group"><label>Budget category</label><select id="trainCategory" required></select></div>
+        <div class="form-group"><label>Only for entity (optional)</label><select id="trainEntity"><option value="">All entities</option></select></div>
+        <div class="form-group"><label>Label</label><input type="text" id="trainLabel" placeholder="e.g. Vehicle business loan" /></div>
+        <label class="text-sm" style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+          <input type="checkbox" id="trainRecategorise" checked /> Also retag matching past expenses to this category
+        </label>
+        <button type="submit" class="btn btn-primary btn-block">Save rule</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Entity Modal -->
   <div class="modal-overlay" id="entityModal">
     <div class="modal">
@@ -404,7 +425,7 @@
   </div>
 
   <script>
-    const DEFAULT_CATEGORIES = ['Housing','Food','Transport','Fuel','Utilities','Phone','Insurance','Entertainment','Subscriptions','Health','Investing','Personal','Tools','Materials','Subcontractors','Income','Other'];
+    const DEFAULT_CATEGORIES = ['Housing','Food','Transport','Fuel','Vehicle','Utilities','Phone','Insurance','Entertainment','Subscriptions','Health','Investing','Personal','Tools','Materials','Subcontractors','Income','Other'];
     const DEFAULT_ENTITIES = [
       { id: 'personal', name: 'Personal', type: 'personal' },
       { id: 'business', name: 'Business', type: 'company' },
@@ -427,6 +448,7 @@
     let data = {
       entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)),
       holdings: [], transactions: [], budgets: {},
+      budgetTraining: [],
       categories: [...DEFAULT_CATEGORIES],
       settings: { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini' }
     };
@@ -445,6 +467,7 @@
           data = { ...data, ...parsed };
           data.settings = { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini', ...(parsed.settings || {}) };
           if (!data.entities || !data.entities.length) data.entities = JSON.parse(JSON.stringify(DEFAULT_ENTITIES));
+          if (!Array.isArray(data.budgetTraining)) data.budgetTraining = [];
           data.categories = mergeCategories(data.categories);
           data.holdings.forEach(h => { if (!h.entityId) h.entityId = 'personal'; });
           data.transactions.forEach(t => { if (!t.entityId) t.entityId = 'personal'; });
@@ -491,7 +514,7 @@
       document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.section === id));
       renderAll();
     }
-    function renderAll() { renderDashboard(); renderPortfolio(); renderSpending(); renderBudgets(); renderEntitiesList(); }
+    function renderAll() { renderDashboard(); renderPortfolio(); renderSpending(); renderBudgets(); renderBudgetTrainingList(); renderEntitiesList(); }
 
     function formatAUD(n) {
       if (n == null || isNaN(n)) return '$0.00';
@@ -760,8 +783,88 @@
     }
 
 
+
+    function matchBudgetRule(desc, entityId) {
+      const d = desc || '';
+      const training = (data.budgetTraining || []).filter(r => r && r.match);
+      for (const r of training) {
+        if (r.entityId && entityId && r.entityId !== entityId) continue;
+        if (d.toLowerCase().includes(String(r.match).toLowerCase())) {
+          return { category: r.category, label: r.label || r.match, trained: true };
+        }
+      }
+      const built = BILL_RULES.find(r => r.test(d));
+      if (!built) return null;
+      return { category: built.category, label: built.label, trained: false };
+    }
+
+    function renderBudgetTrainingList() {
+      const el = document.getElementById('budgetTrainingList');
+      if (!el) return;
+      const rules = data.budgetTraining || [];
+      if (!rules.length) { el.innerHTML = ''; return; }
+      el.innerHTML = `<div class="card" style="padding:12px;margin-bottom:8px;"><div class="text-sm text-muted mb-2">Your trained rules</div>` +
+        rules.map((r, i) => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">“${escapeHtml(r.match)}” → ${escapeHtml(r.category)}</div><div class="list-item-sub">${escapeHtml(r.label || '')}${r.entityId ? ' · ' + escapeHtml(getEntityName(r.entityId)) : ' · all entities'}</div></div><button type="button" class="btn btn-danger btn-sm" onclick="deleteTrainBudgetRule(${i})">Del</button></div>`).join('') +
+        `</div>`;
+    }
+
+    function openTrainBudgetModal() {
+      const catSel = document.getElementById('trainCategory');
+      const entSel = document.getElementById('trainEntity');
+      if (catSel) catSel.innerHTML = data.categories.filter(c => c !== 'Income' && c !== 'Salary').map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+      if (entSel) {
+        entSel.innerHTML = `<option value="">All entities</option>` + data.entities.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
+        if (data.settings.currentEntity && data.settings.currentEntity !== 'all') entSel.value = data.settings.currentEntity;
+      }
+      document.getElementById('trainMatch').value = '';
+      document.getElementById('trainLabel').value = '';
+      document.getElementById('trainRecategorise').checked = true;
+      if (catSel && [...catSel.options].some(o => o.value === 'Vehicle')) catSel.value = 'Vehicle';
+      document.getElementById('trainBudgetModal').classList.add('open');
+    }
+
+    function saveTrainBudgetRule(e) {
+      e.preventDefault();
+      const match = document.getElementById('trainMatch').value.trim();
+      const category = document.getElementById('trainCategory').value;
+      const entityId = document.getElementById('trainEntity').value || '';
+      const label = document.getElementById('trainLabel').value.trim() || match;
+      if (!match || !category) return;
+      if (!Array.isArray(data.budgetTraining)) data.budgetTraining = [];
+      const idx = data.budgetTraining.findIndex(r => r.match.toLowerCase() === match.toLowerCase() && (r.entityId || '') === entityId);
+      const rule = { match, category, entityId, label };
+      if (idx >= 0) data.budgetTraining[idx] = rule; else data.budgetTraining.push(rule);
+
+      let retagged = 0;
+      if (document.getElementById('trainRecategorise').checked) {
+        data.transactions.forEach(t => {
+          if (!(t.amount > 0)) return;
+          if (entityId && t.entityId !== entityId) return;
+          if ((t.description || '').toLowerCase().includes(match.toLowerCase())) {
+            t.category = category;
+            retagged++;
+          }
+        });
+      }
+      if (!data.categories.includes(category)) data.categories.push(category);
+      saveData();
+      closeModal('trainBudgetModal');
+      renderBudgetTrainingList();
+      renderBudgets();
+      const status = document.getElementById('budgetSuggestStatus');
+      if (status) status.textContent = `Saved rule “${match}” → ${category}.` + (retagged ? ` Retagged ${retagged} expense(s).` : '');
+    }
+
+    function deleteTrainBudgetRule(i) {
+      if (!confirm('Delete this trained rule?')) return;
+      data.budgetTraining.splice(i, 1);
+      saveData();
+      renderBudgetTrainingList();
+    }
+
     const BILL_RULES = [
-      { category: 'Housing', label: 'Mortgage / loan', test: (d) => /\b(loan payment|mortgage|home\s*loan|plenti|homeloan|pepper money|latrobe|firstmac)\b/i.test(d) && !/\binterest\b/i.test(d) },
+      { category: 'Housing', label: 'Mortgage / loan', test: (d) => /\b(loan payment|mortgage|home\s*loan|homeloan|pepper money|latrobe|firstmac)\b/i.test(d) && !/\b(plenti|vehicle|car loan|novated)\b/i.test(d) && !/\binterest\b/i.test(d) },
+      { category: 'Vehicle', label: 'Vehicle / car loan', test: (d) => /\b(plenti|car loan|vehicle loan|novated lease|toyota finance|mazda finance|bmw finance|lexus finance|car finance)\b/i.test(d) },
       { category: 'Housing', label: 'Rent', test: (d) => /\b(rent payment|rental|landlord|ray white|lj hooker|harcourts|professionals real)\b/i.test(d) },
       { category: 'Housing', label: 'Council rates', test: (d) => /\b(council rates|city of |shire of |rates payment|watercorp rates)\b/i.test(d) },
       { category: 'Utilities', label: 'Electricity', test: (d) => /\b(synergy|agl|alinta|origin energy|simply energy|electric|elec bill|powerbill|western power|energy australia)\b/i.test(d) },
@@ -799,12 +902,12 @@
       const matchedLabels = {};
       txs.forEach(t => {
         const desc = t.description || '';
-        const rule = BILL_RULES.find(r => r.test(desc));
-        if (!rule) return;
+        const matched = matchBudgetRule(desc, t.entityId);
+        if (!matched) return;
         const month = t.date.slice(0, 7);
-        const key = t.entityId + '|' + rule.category;
+        const key = t.entityId + '|' + matched.category;
         matchedLabels[key] = matchedLabels[key] || new Set();
-        matchedLabels[key].add(rule.label);
+        matchedLabels[key].add(matched.label);
         byEntCatMonth[key] = byEntCatMonth[key] || {};
         byEntCatMonth[key][month] = (byEntCatMonth[key][month] || 0) + t.amount;
       });
@@ -1137,6 +1240,7 @@
             holdings: parsed.holdings || [],
             transactions: parsed.transactions || [],
             budgets: parsed.budgets || {},
+            budgetTraining: Array.isArray(parsed.budgetTraining) ? parsed.budgetTraining : [],
             categories: (parsed.categories && parsed.categories.length) ? parsed.categories : [...DEFAULT_CATEGORIES],
             settings: {
               theme: (parsed.settings && parsed.settings.theme) || data.settings.theme || 'dark',
