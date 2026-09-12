@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta name="apple-mobile-web-app-title" content="Ledger" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#000000" />
-  <title>Vault · 20260912-0526</title>
+  <title>Ledger · 20260912-0527</title>
   <!-- Chart.js vendor (local). Fallback CDN: https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js -->
   <script src="vendor/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -158,7 +159,7 @@
 </head>
 <body data-theme="dark">
   <header>
-    <div class="logo">Vault <span>·</span></div>
+    <div class="logo">Ledger <span>·</span></div>
     <div class="header-actions">
       <select id="entityFilter" class="entity-select" onchange="onEntityFilterChange()"></select>
       <button class="icon-btn" id="themeToggle" title="Toggle theme">◐</button>
@@ -168,7 +169,7 @@
   <main>
     <div id="onboardingTip" class="onboarding hidden">
       <button class="dismiss" onclick="dismissOnboarding()" title="Dismiss">×</button>
-      <h3>Welcome to Vault</h3>
+      <h3>Welcome to Ledger</h3>
       <p>Track spending and investments across entities (Personal, Business, Trust, and more). Use <strong>Scan Receipt</strong> on Spend to file expenses quickly — confirm before anything is saved.</p>
       <div class="flex gap-2">
         <button class="btn btn-primary btn-sm" onclick="showSection('spending'); document.getElementById('receiptFile').click();">Try Scan</button>
@@ -344,12 +345,12 @@
       </div>
       <div class="card">
         <div class="card-header"><div class="card-title">Backup / Restore</div></div>
-        <p class="text-sm text-muted mb-2">Export a full Vault backup, or restore one (e.g. Trust crypto import). Restore replaces all current Vault data on this device.</p>
+        <p class="text-sm text-muted mb-2">Export a full Ledger backup, or restore one (e.g. Trust crypto import). Restore replaces all current Ledger data on this device.</p>
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-block" onclick="exportJSON()">Export JSON</button>
           <button class="btn btn-secondary btn-block" onclick="exportCSV()">Export CSV</button>
         </div>
-        <div class="drop-zone mt-2" id="jsonDropZone" onclick="document.getElementById('jsonBackupFile').click()"><p>Tap to restore Vault JSON backup</p>
+        <div class="drop-zone mt-2" id="jsonDropZone" onclick="document.getElementById('jsonBackupFile').click()"><p>Tap to restore Ledger JSON backup</p>
           <input type="file" id="jsonBackupFile" accept=".json,application/json" class="hidden" />
         </div>
         <div id="jsonImportStatus" class="status-msg text-muted mt-2"></div>
@@ -401,7 +402,7 @@
   </main>
 
   <div class="disclaimer">
-    Vault is a personal tracking tool only. It does not provide financial, investment or tax advice.
+    Ledger is a personal tracking tool only. It does not provide financial, investment or tax advice.
     Past performance is not indicative of future results. Always do your own research.
   </div>
 
@@ -2077,9 +2078,9 @@
         try {
           const parsed = JSON.parse(reader.result);
           if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.holdings)) {
-            throw new Error('Not a Vault backup (missing holdings)');
+            throw new Error('Not a Ledger backup (missing holdings)');
           }
-          if (!confirm('Replace ALL Vault data on this device with this backup?')) return;
+          if (!confirm('Replace ALL Ledger data on this device with this backup?')) return;
           data = {
             entities: (parsed.entities && parsed.entities.length) ? parsed.entities : JSON.parse(JSON.stringify(DEFAULT_ENTITIES)),
             holdings: Array.isArray(parsed.holdings) ? parsed.holdings : [],
@@ -2119,7 +2120,7 @@
 
     function exportJSON() {
       const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `vault-backup-${today()}.json`; a.click();
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `ledger-backup-${today()}.json`; a.click();
     }
     function exportCSV() {
       let csv = 'Type,Entity,Date,Symbol/Description,Quantity,Amount,Category,GST,ABN,Tags,Notes\n';
@@ -2130,7 +2131,7 @@
         csv += `Transaction,${csvEscape(getEntityName(t.entityId))},${csvEscape(t.date)},${csvEscape(t.description||'')},,${t.amount},${csvEscape(t.category)},${t.gstAmount!=null?t.gstAmount:''},${csvEscape(t.abn||'')},${csvEscape(tags)},\n`;
       });
       const blob = new Blob([csv], { type: 'text/csv' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `vault-export-${today()}.csv`; a.click();
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `ledger-export-${today()}.csv`; a.click();
     }
     function clearAllData() {
       if (!confirm('Permanently delete all data?') || !confirm('Really sure?')) return;
