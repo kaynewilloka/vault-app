@@ -235,11 +235,16 @@
         <div id="importPreview" class="mt-3 hidden"></div>
       </div>
       <div class="card">
-        <div class="card-header"><div class="card-title">Export Data</div></div>
+        <div class="card-header"><div class="card-title">Backup / Restore</div></div>
+        <p class="text-sm text-muted mb-2">Export a full Vault backup, or restore one (e.g. Trust crypto import). Restore replaces all current Vault data on this device.</p>
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-block" onclick="exportJSON()">Export JSON</button>
           <button class="btn btn-secondary btn-block" onclick="exportCSV()">Export CSV</button>
         </div>
+        <div class="drop-zone mt-2" id="jsonDropZone" onclick="document.getElementById('jsonBackupFile').click()"><p>Tap to restore Vault JSON backup</p>
+          <input type="file" id="jsonBackupFile" accept=".json,application/json" class="hidden" />
+        </div>
+        <div id="jsonImportStatus" class="status-msg text-muted mt-2"></div>
       </div>
       <div class="card">
         <div class="card-header"><div class="card-title">Tools</div></div>
@@ -408,6 +413,9 @@
       'VET':'vechain','FIL':'filecoin','AAVE':'aave','MKR':'maker','SHIB':'shiba-inu','NEAR':'near',
       'FTM':'fantom','SAND':'the-sandbox','MANA':'decentraland','AXS':'axie-infinity','CRO':'crypto-com-chain',
       'USDT':'tether','USDC':'usd-coin','BNB':'binancecoin'
+      'HBAR':'hedera-hashgraph',
+      'WLFI':'world-liberty-financial',
+      'BABY':'babylon',
     };
 
     let data = {
@@ -943,6 +951,9 @@
     dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files.length) handleCSV(e.dataTransfer.files[0]); });
     fileInput.addEventListener('change', () => { if (fileInput.files.length) handleCSV(fileInput.files[0]); });
 
+    const jsonInput = document.getElementById('jsonBackupFile');
+    if (jsonInput) jsonInput.addEventListener('change', () => { if (jsonInput.files.length) importVaultBackupFile(jsonInput.files[0]); });
+
     function handleCSV(file) {
       const reader = new FileReader();
       reader.onload = e => { try { const rows = parseCSV(e.target.result); if (rows.length < 2) { alert('CSV appears empty'); return; } previewImport(rows); } catch (err) { alert('Parse failed: ' + err.message); } };
@@ -993,6 +1004,46 @@
         preview.innerHTML = `<p class="text-sm positive">Imported ${imported} transactions into ${getEntityName(entityId)}.</p>`;
         renderAll();
       };
+    }
+
+
+    function importVaultBackupFile(file) {
+      const status = document.getElementById('jsonImportStatus');
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result);
+          if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.holdings)) {
+            throw new Error('Not a Vault backup (missing holdings)');
+          }
+          if (!confirm('Replace ALL Vault data on this device with this backup?')) return;
+          data = {
+            entities: (parsed.entities && parsed.entities.length) ? parsed.entities : JSON.parse(JSON.stringify(DEFAULT_ENTITIES)),
+            holdings: parsed.holdings || [],
+            transactions: parsed.transactions || [],
+            budgets: parsed.budgets || {},
+            categories: (parsed.categories && parsed.categories.length) ? parsed.categories : [...DEFAULT_CATEGORIES],
+            settings: {
+              theme: (parsed.settings && parsed.settings.theme) || data.settings.theme || 'dark',
+              currentEntity: (parsed.settings && parsed.settings.currentEntity) || 'all',
+              onboardingDismissed: !!(parsed.settings && parsed.settings.onboardingDismissed),
+              aiApiBase: (parsed.settings && parsed.settings.aiApiBase) || '',
+              aiApiKey: (parsed.settings && parsed.settings.aiApiKey) || '',
+              aiModel: (parsed.settings && parsed.settings.aiModel) || 'gpt-4o-mini'
+            }
+          };
+          saveData();
+          populateEntitySelects();
+          renderAll();
+          updateOnboarding();
+          if (status) status.textContent = `Restored ${data.holdings.length} holding(s), ${data.transactions.length} transaction(s).`;
+        } catch (e) {
+          console.error(e);
+          if (status) status.textContent = 'Restore failed: ' + (e.message || 'invalid file');
+        }
+      };
+      reader.readAsText(file);
     }
 
     function exportJSON() {
