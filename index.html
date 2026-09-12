@@ -219,7 +219,7 @@
             <button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Edit</button>
           </div>
         </div>
-        <p class="text-sm text-muted mb-2">Suggest pulls clear repeats (power, gas, phone, mortgage/loan, fuel) from your transactions into monthly budgets. You confirm before anything is saved.</p>
+        <p class="text-sm text-muted mb-2">Suggest pulls clear repeats — power, gas, water, internet, phone, mortgage/rent, insurance, streaming, gym, fuel, and similar — into monthly budgets. You confirm before anything is saved.</p>
         <div id="budgetSuggestStatus" class="status-msg text-muted"></div>
         <div id="budgetsList"></div>
       </div>
@@ -404,7 +404,7 @@
   </div>
 
   <script>
-    const DEFAULT_CATEGORIES = ['Housing','Food','Transport','Fuel','Utilities','Phone','Entertainment','Subscriptions','Health','Investing','Personal','Tools','Materials','Subcontractors','Income','Other'];
+    const DEFAULT_CATEGORIES = ['Housing','Food','Transport','Fuel','Utilities','Phone','Insurance','Entertainment','Subscriptions','Health','Investing','Personal','Tools','Materials','Subcontractors','Income','Other'];
     const DEFAULT_ENTITIES = [
       { id: 'personal', name: 'Personal', type: 'personal' },
       { id: 'business', name: 'Business', type: 'company' },
@@ -761,11 +761,21 @@
 
 
     const BILL_RULES = [
-      { category: 'Housing', label: 'Mortgage / loan', test: (d) => /\b(loan payment|mortgage|home\s*loan|plenti|homeloan)\b/i.test(d) && !/\binterest\b/i.test(d) },
-      { category: 'Utilities', label: 'Electricity', test: (d) => /\b(synergy|agl|alinta|origin energy|simply energy|electric|elec bill|powerbill|western power)\b/i.test(d) },
+      { category: 'Housing', label: 'Mortgage / loan', test: (d) => /\b(loan payment|mortgage|home\s*loan|plenti|homeloan|pepper money|latrobe|firstmac)\b/i.test(d) && !/\binterest\b/i.test(d) },
+      { category: 'Housing', label: 'Rent', test: (d) => /\b(rent payment|rental|landlord|ray white|lj hooker|harcourts|professionals real)\b/i.test(d) },
+      { category: 'Housing', label: 'Council rates', test: (d) => /\b(council rates|city of |shire of |rates payment|watercorp rates)\b/i.test(d) },
+      { category: 'Utilities', label: 'Electricity', test: (d) => /\b(synergy|agl|alinta|origin energy|simply energy|electric|elec bill|powerbill|western power|energy australia)\b/i.test(d) },
       { category: 'Utilities', label: 'Gas bill', test: (d) => /\b(kleenheat|gas bill|natural gas|origin gas|agl gas)\b/i.test(d) || (/\bgas\b/i.test(d) && !/\b(fuel|unleaded|diesel|petrol|servo)\b/i.test(d)) },
+      { category: 'Utilities', label: 'Water', test: (d) => /\b(water corporation|watercorp|sydney water|yarra valley water|urban utilities|water bill)\b/i.test(d) },
+      { category: 'Utilities', label: 'Internet / NBN', test: (d) => /\b(nbn|aussie broadband|tpg|iiNet|superloop|exetel|leaptel|spintel|dodo internet|internet bill|fibre)\b/i.test(d) },
       { category: 'Phone', label: 'Phone', test: (d) => /\b(telstra|optus|vodafone|amaysim|belong|boost mobile|phone bill|mobile plan)\b/i.test(d) },
-      { category: 'Fuel', label: 'Fuel / servo', test: (d) => /\b(fuel|petrol|diesel|unleaded|caltex|shell|bp\b|ampol|7-eleven|mobil|united petroleum|puma energy)\b/i.test(d) }
+      { category: 'Fuel', label: 'Fuel / servo', test: (d) => /\b(fuel|petrol|diesel|unleaded|caltex|shell|bp\b|ampol|7-eleven|mobil|united petroleum|puma energy)\b/i.test(d) },
+      { category: 'Insurance', label: 'Insurance', test: (d) => /\b(insurance|nrma|rac|racq|racv|aami|allianz|budget direct|youi|bingle|suncorp insurance|hcf|medibank|bupa|nib health|ahm health)\b/i.test(d) },
+      { category: 'Subscriptions', label: 'Streaming / subs', test: (d) => /\b(netflix|spotify|disney\+|disney plus|stan\b|amazon prime|prime video|youtube premium|apple\.com\/bill|icloud|adobe|microsoft 365|office 365|chatgpt|openai|github|google.?one|icloud\+?)\b/i.test(d) },
+      { category: 'Health', label: 'Gym / fitness', test: (d) => /\b(gym|fitness first|anytime fitness|jetts|goodlife|f45|plus fitness|club pilates)\b/i.test(d) },
+      { category: 'Health', label: 'Clinical / medical', test: (d) => /\b(clinical labs|pathology|medicare|chemist warehouse|priceline|terrywhite|doctor|dental|physio)\b/i.test(d) },
+      { category: 'Transport', label: 'Car / rego / tolls', test: (d) => /\b(rego|transport for nsw|linkt|eastlink|toll road|department of transport|dotwa|car registration)\b/i.test(d) },
+      { category: 'Subscriptions', label: 'Software / tools', test: (d) => /\b(xero|quickbooks|myob|canva|notion|slack|zoom\.us|dropbox)\b/i.test(d) }
     ];
 
     function median(nums) {
@@ -818,7 +828,7 @@
       });
 
       if (!suggestions.length) {
-        if (status) status.textContent = 'Nothing clear enough (gas/power/phone/mortgage/fuel) in this view yet.';
+        if (status) status.textContent = 'Nothing clear enough in this view yet (bills, insurance, streaming, fuel, etc.).';
         return;
       }
 
