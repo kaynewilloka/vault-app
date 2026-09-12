@@ -175,6 +175,7 @@
           <div class="card-title">Holdings</div>
           <div class="flex gap-2">
             <button class="btn btn-secondary btn-sm" onclick="refreshCryptoPrices()">↻ Crypto</button>
+            <button class="btn btn-secondary btn-sm" onclick="refreshStockPrices()">↻ Stocks</button>
             <button class="btn btn-primary btn-sm" onclick="openHoldingModal()">+ Add</button>
           </div>
         </div>
@@ -506,6 +507,85 @@
         if (f === 'all' || ent === f) total += Number(data.budgets[key]) || 0;
       });
       return total;
+    }
+
+
+    async function fetchJsonViaProxy(url) {
+      try {
+        const direct = await fetch(url);
+        if (direct.ok) return direct.json();
+      } catch (_) { /* browser CORS — fall through */ }
+      const proxied = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(url));
+      if (!proxied.ok) throw new Error('Proxy HTTP ' + proxied.status);
+      return proxied.json();
+    }
+
+    async function getAudRate(currency) {
+      const cur = (currency || 'AUD').toUpperCase();
+      if (cur === 'AUD') return 1;
+      const res = await fetch(`https://api.frankfurter.app/latest?from=${encodeURIComponent(cur)}&to=AUD`);
+      if (!res.ok) throw new Error('FX ' + cur);
+      const j = await res.json();
+      const rate = j.rates && j.rates.AUD;
+      if (!rate) throw new Error('No AUD rate for ' + cur);
+      return rate;
+    }
+
+    async function quoteYahooSymbol(symbol) {
+      const sym = (symbol || '').trim().toUpperCase();
+      if (!sym) return null;
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?interval=1d&range=1d`;
+      const j = await fetchJsonViaProxy(url);
+      const meta = j && j.chart && j.chart.result && j.chart.result[0] && j.chart.result[0].meta;
+      if (!meta || meta.regularMarketPrice == null) return null;
+      return { symbol: sym, price: Number(meta.regularMarketPrice), currency: (meta.currency || 'USD').toUpperCase() };
+    }
+
+    async function refreshStockPrices() {
+      const status = document.getElementById('priceStatus');
+      const stocks = data.holdings.filter(h => h.type === 'stock');
+      if (!stocks.length) { status.textContent = 'No stock/ETF holdings to update.'; return; }
+      status.textContent = 'Fetching stock prices…';
+      try {
+        const symbols = [...new Set(stocks.map(h => (h.symbol || '').trim().toUpperCase()).filter(Boolean))];
+        const quotes = {};
+        const rateCache = { AUD: 1 };
+        let failed = 0;
+        // sequential batches of 4 to be gentle on proxy
+        for (let i = 0; i < symbols.length; i += 4) {
+          const batch = symbols.slice(i, i + 4);
+          const results = await Promise.all(batch.map(async sym => {
+            try { return await quoteYahooSymbol(sym); }
+            catch (e) { console.error(sym, e); return null; }
+          }));
+          results.forEach(q => {
+            if (q && q.price > 0) quotes[q.symbol] = q;
+            else failed++;
+          });
+        }
+        let updated = 0;
+        for (const h of data.holdings) {
+          if (h.type !== 'stock') continue;
+          const sym = (h.symbol || '').trim().toUpperCase();
+          const q = quotes[sym];
+          if (!q) continue;
+          let rate = rateCache[q.currency];
+          if (rate == null) {
+            try { rate = await getAudRate(q.currency); rateCache[q.currency] = rate; }
+            catch (e) { console.error(e); status.textContent = `Got ${sym} in ${q.currency} but FX convert failed.`; return; }
+          }
+          h.currentPrice = q.price * rate;
+          h.updatedAt = new Date().toISOString();
+          updated++;
+        }
+        saveData();
+        const extra = failed ? ` (${failed} symbol(s) not found — check tickers, e.g. BHP.AX)` : '';
+        status.textContent = updated ? `Updated ${updated} stock price(s) in AUD.${extra}` : `No stock prices updated.${extra}`;
+        renderPortfolio(); renderDashboard();
+      } catch (err) {
+        status.textContent = 'Stock price fetch failed. Check connection or try again later.';
+        console.error(err);
+      }
     }
 
     async function refreshCryptoPrices() {
