@@ -8,6 +8,7 @@
   <title>Vault — Multi-Entity Portfolio & Budget</title>
   <!-- Chart.js vendor (local). Fallback CDN: https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js -->
   <script src="vendor/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <style>
     :root {
       --bg: #0f1419; --bg-elevated: #1a2332; --bg-card: #1e293b; --border: #2d3a4f;
@@ -101,7 +102,16 @@
     .badge { display: inline-block; font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; font-weight: 600; text-transform: uppercase; margin-left: 4px; }
     .badge-stock { background: rgba(59,130,246,0.15); color: var(--accent); }
     .badge-crypto { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .badge-cash { background: rgba(34,197,94,0.15); color: var(--positive); }
+    .badge-loan { background: rgba(239,68,68,0.15); color: var(--negative); }
+    .badge-credit { background: rgba(245,158,11,0.15); color: var(--warning); }
     .badge-entity { background: rgba(148,163,184,0.15); color: var(--text-muted); }
+    .tag-chip { display: inline-block; font-size: 0.7rem; padding: 1px 6px; border-radius: 999px; background: rgba(59,130,246,0.12); color: var(--accent); margin-right: 4px; }
+    .inbox-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+    .inbox-actions select { width: auto; min-width: 110px; padding: 6px 8px; font-size: 0.8rem; }
+    .networth-entity { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+    .networth-entity:last-child { border-bottom: none; }
+    .xero-note { font-size: 0.8rem; color: var(--text-muted); background: var(--bg-elevated); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; border-left: 3px solid var(--accent); }
     .insight { background: var(--bg-elevated); border-left: 3px solid var(--accent); padding: 10px 12px; margin-bottom: 8px; border-radius: 0 8px 8px 0; font-size: 0.9rem; }
     .insight.warn { border-left-color: var(--warning); }
     .insight.risk { border-left-color: var(--negative); }
@@ -155,6 +165,15 @@
         </div>
       </div>
       <div class="card">
+        <div class="card-header"><div class="card-title">Net Worth</div></div>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">Assets</div><div class="metric-value positive" id="dashAssets">$0.00</div></div>
+          <div class="metric"><div class="metric-label">Liabilities</div><div class="metric-value negative" id="dashLiabilities">$0.00</div></div>
+          <div class="metric" style="grid-column:1/-1"><div class="metric-label">Net Worth</div><div class="metric-value" id="dashNetWorth">$0.00</div></div>
+        </div>
+        <div id="netWorthByEntity" class="mt-2"></div>
+      </div>
+      <div class="card">
         <div class="card-header"><div class="card-title">Insights</div></div>
         <div id="insightsList"></div>
       </div>
@@ -172,6 +191,14 @@
     <section id="portfolio" class="section">
       <div class="card">
         <div class="card-header">
+          <div class="card-title">Accounts (Cash / Loans)</div>
+          <button class="btn btn-primary btn-sm" onclick="openAccountModal()">+ Add</button>
+        </div>
+        <p class="text-sm text-muted mb-2">Cash adds to net worth; loans &amp; credit reduce it.</p>
+        <div id="accountsList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
           <div class="card-title">Holdings</div>
           <div class="flex gap-2">
             <button class="btn btn-secondary btn-sm" onclick="refreshCryptoPrices()">↻ Crypto</button>
@@ -187,6 +214,7 @@
         <div class="metric-grid">
           <div class="metric"><div class="metric-label">Total Cost</div><div class="metric-value" id="portTotalCost">$0.00</div></div>
           <div class="metric"><div class="metric-label">Market Value</div><div class="metric-value" id="portMarketValue">$0.00</div></div>
+          <div class="metric" style="grid-column:1/-1"><div class="metric-label">Unrealised P/L</div><div class="metric-value" id="portPnL">$0.00</div></div>
         </div>
       </div>
     </section>
@@ -203,6 +231,19 @@
         <input type="file" id="receiptFile" class="hidden" accept="image/*,application/pdf,.pdf" />
         <div class="form-group" style="margin-bottom:12px;"><select id="spendMonthFilter" onchange="renderSpending()"></select></div>
         <div id="transactionsList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Review Inbox</div>
+          <span class="text-sm text-muted" id="inboxCount"></span>
+        </div>
+        <p class="text-sm text-muted mb-2">Expenses missing a category or marked Other — quick-fix from trained rules.</p>
+        <div id="reviewInbox"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Bills / Recurring</div></div>
+        <p class="text-sm text-muted mb-2">Detected from repeated expenses (same fingerprint + similar amount).</p>
+        <div id="billsList"></div>
       </div>
       <div class="card">
         <div class="card-header"><div class="card-title">Spending by Category</div></div>
@@ -252,6 +293,15 @@
           <input type="file" id="jsonBackupFile" accept=".json,application/json" class="hidden" />
         </div>
         <div id="jsonImportStatus" class="status-msg text-muted mt-2"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Export for Xero</div></div>
+        <div class="xero-note">For reconcile in Xero — not a Xero replacement. Use this CSV (+ optional receipt zip) as a bank/spend import checklist.</div>
+        <div class="form-group"><label>From date (optional)</label><input type="date" id="xeroFromDate" /></div>
+        <div class="form-group"><label>To date (optional)</label><input type="date" id="xeroToDate" /></div>
+        <button class="btn btn-primary btn-block" onclick="exportForXero(false)">Download CSV</button>
+        <button class="btn btn-secondary btn-block mt-2" onclick="exportForXero(true)">Download ZIP (CSV + receipts)</button>
+        <div id="xeroExportStatus" class="status-msg text-muted mt-2"></div>
       </div>
       <div class="card">
         <div class="card-header"><div class="card-title">Tools</div></div>
@@ -339,6 +389,27 @@
     </div>
   </div>
 
+  <!-- Account Modal -->
+  <div class="modal-overlay" id="accountModal">
+    <div class="modal">
+      <div class="modal-header"><div class="modal-title" id="accountModalTitle">Add Account</div><button class="close-btn" onclick="closeModal('accountModal')">×</button></div>
+      <form id="accountForm" onsubmit="saveAccount(event)">
+        <input type="hidden" id="accountId" />
+        <div class="form-group"><label>Entity</label><select id="accountEntity" required></select></div>
+        <div class="form-group"><label>Type</label><select id="accountType" required>
+          <option value="cash">Cash / Bank</option>
+          <option value="loan">Loan</option>
+          <option value="credit">Credit card</option>
+        </select></div>
+        <div class="form-group"><label>Name</label><input type="text" id="accountName" placeholder="e.g. Everyday account, Home loan" required /></div>
+        <div class="form-group"><label>Balance (AUD)</label><input type="number" id="accountBalance" step="0.01" required /><p class="text-sm text-muted mt-1">For loans &amp; credit, enter the amount owed (positive).</p></div>
+        <div class="form-group"><label>Notes</label><textarea id="accountNotes" placeholder="Optional"></textarea></div>
+        <button type="submit" class="btn btn-primary btn-block">Save Account</button>
+        <button type="button" class="btn btn-danger btn-block mt-2 hidden" id="deleteAccountBtn" onclick="deleteAccount()">Delete</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Holding Modal -->
   <div class="modal-overlay" id="holdingModal">
     <div class="modal">
@@ -370,6 +441,9 @@
         <div class="form-group"><label>Description</label><input type="text" id="txDesc" placeholder="e.g. Coles, Fuel, Salary" required /></div>
         <div class="form-group"><label>Amount (AUD)</label><input type="number" id="txAmount" step="0.01" required /><p class="text-sm text-muted mt-1">Positive = expense, negative = income</p></div>
         <div class="form-group"><label>Category</label><select id="txCategory" required></select></div>
+        <div class="form-group"><label>Tags (comma-separated)</label><input type="text" id="txTags" placeholder="e.g. job-42, deductible" /></div>
+        <div class="form-group"><label>GST amount (optional)</label><input type="number" id="txGst" step="0.01" min="0" placeholder="e.g. 10.00" /></div>
+        <div class="form-group"><label>ABN (optional)</label><input type="text" id="txAbn" placeholder="Supplier ABN for business receipts" /></div>
         <div class="form-group">
           <label>Receipt</label>
           <div id="txReceiptPreviewWrap" class="hidden" style="margin-bottom:8px;">
@@ -463,6 +537,7 @@
     let data = {
       entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)),
       holdings: [], transactions: [], budgets: {},
+      accounts: [],
       budgetTraining: [],
       categories: [...DEFAULT_CATEGORIES],
       settings: { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini' }
@@ -483,9 +558,18 @@
           data.settings = { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini', ...(parsed.settings || {}) };
           if (!data.entities || !data.entities.length) data.entities = JSON.parse(JSON.stringify(DEFAULT_ENTITIES));
           if (!Array.isArray(data.budgetTraining)) data.budgetTraining = [];
+          if (!Array.isArray(data.accounts)) data.accounts = [];
+          if (!Array.isArray(data.holdings)) data.holdings = [];
+          if (!Array.isArray(data.transactions)) data.transactions = [];
+          if (!data.budgets || typeof data.budgets !== 'object') data.budgets = {};
           data.categories = mergeCategories(data.categories);
           data.holdings.forEach(h => { if (!h.entityId) h.entityId = 'personal'; });
-          data.transactions.forEach(t => { if (!t.entityId) t.entityId = 'personal'; });
+          data.accounts.forEach(a => { if (!a.entityId) a.entityId = 'personal'; if (!a.currency) a.currency = 'AUD'; });
+          data.transactions.forEach(t => {
+            if (!t.entityId) t.entityId = 'personal';
+            if (!Array.isArray(t.tags)) t.tags = t.tags ? String(t.tags).split(',').map(s => s.trim()).filter(Boolean) : [];
+            if (t.gstAmount == null && t.gst != null) t.gstAmount = t.gst;
+          });
         }
       } catch (e) { console.warn(e); }
       applyTheme();
@@ -505,7 +589,7 @@
       const filter = document.getElementById('entityFilter');
       const current = data.settings.currentEntity || 'all';
       filter.innerHTML = `<option value="all">All Entities</option>` + data.entities.map(e => `<option value="${e.id}" ${e.id===current?'selected':''}>${escapeHtml(e.name)}</option>`).join('');
-      ['holdingEntity','txEntity','budgetEntity','rcptEntity'].forEach(id => {
+      ['holdingEntity','txEntity','budgetEntity','rcptEntity','accountEntity'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.innerHTML = data.entities.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
       });
@@ -522,6 +606,11 @@
       const f = data.settings.currentEntity;
       return f === 'all' ? data.transactions : data.transactions.filter(t => t.entityId === f);
     }
+    function filteredAccounts() {
+      const f = data.settings.currentEntity;
+      if (!Array.isArray(data.accounts)) return [];
+      return f === 'all' ? data.accounts : data.accounts.filter(a => a.entityId === f);
+    }
 
     function showSection(id) {
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
@@ -529,7 +618,7 @@
       document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.section === id));
       renderAll();
     }
-    function renderAll() { renderDashboard(); renderPortfolio(); renderSpending(); renderBudgets(); renderBudgetTrainingList(); renderEntitiesList(); }
+    function renderAll() { renderDashboard(); renderPortfolio(); renderAccounts(); renderSpending(); renderReviewInbox(); renderBills(); renderBudgets(); renderBudgetTrainingList(); renderEntitiesList(); }
 
     function formatAUD(n) {
       if (n == null || isNaN(n)) return '$0.00';
@@ -541,11 +630,26 @@
     function currentMonthKey() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
     function escapeHtml(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+    function isMarketHolding(h) { return h && (h.type === 'stock' || h.type === 'crypto' || !h.type); }
     function calcPortfolio(holdings = null) {
-      const list = holdings || filteredHoldings();
+      const list = (holdings || filteredHoldings()).filter(isMarketHolding);
       let totalCost = 0, totalValue = 0;
       list.forEach(h => { totalCost += (h.quantity||0)*(h.avgCost||0); totalValue += (h.quantity||0)*(h.currentPrice||0); });
       return { totalCost, totalValue, pnl: totalValue - totalCost, pnlPct: totalCost > 0 ? ((totalValue-totalCost)/totalCost)*100 : 0 };
+    }
+    function calcNetWorth(entityFilter) {
+      const f = entityFilter != null ? entityFilter : data.settings.currentEntity;
+      const holdings = f === 'all' ? data.holdings : data.holdings.filter(h => h.entityId === f);
+      const accounts = f === 'all' ? (data.accounts || []) : (data.accounts || []).filter(a => a.entityId === f);
+      const port = calcPortfolio(holdings);
+      let cash = 0, liabilities = 0;
+      accounts.forEach(a => {
+        const bal = Number(a.balance) || 0;
+        if (a.type === 'cash') cash += bal;
+        else if (a.type === 'loan' || a.type === 'credit') liabilities += Math.abs(bal);
+      });
+      const assets = port.totalValue + cash;
+      return { assets, cash, portfolioValue: port.totalValue, liabilities, netWorth: assets - liabilities, port };
     }
     function getMonthSpend(monthKey) {
       const f = data.settings.currentEntity;
@@ -715,6 +819,7 @@
 
     function renderDashboard() {
       const port = calcPortfolio();
+      const nw = calcNetWorth();
       const monthKey = currentMonthKey();
       const spend = getMonthSpend(monthKey);
       const budgetTotal = getBudgetTotal();
@@ -730,9 +835,31 @@
       document.getElementById('dashEntityLabel').textContent = data.settings.currentEntity === 'all' ? '' : '· ' + getEntityName(data.settings.currentEntity);
       document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
 
+      const assetsEl = document.getElementById('dashAssets');
+      const liabEl = document.getElementById('dashLiabilities');
+      const nwEl = document.getElementById('dashNetWorth');
+      if (assetsEl) assetsEl.textContent = formatAUD(nw.assets);
+      if (liabEl) liabEl.textContent = formatAUD(nw.liabilities);
+      if (nwEl) {
+        nwEl.textContent = formatAUD(nw.netWorth);
+        nwEl.className = 'metric-value ' + (nw.netWorth >= 0 ? 'positive' : 'negative');
+      }
+      const byEntEl = document.getElementById('netWorthByEntity');
+      if (byEntEl) {
+        if (data.settings.currentEntity === 'all' && data.entities.length > 1) {
+          byEntEl.innerHTML = '<div class="card-title mb-2" style="margin-top:8px">By entity</div>' + data.entities.map(e => {
+            const eNw = calcNetWorth(e.id);
+            if (eNw.assets === 0 && eNw.liabilities === 0) return '';
+            return `<div class="networth-entity"><span>${escapeHtml(e.name)}</span><span class="${eNw.netWorth>=0?'positive':'negative'}">${formatAUD(eNw.netWorth)}</span></div>`;
+          }).filter(Boolean).join('') || '<p class="text-sm text-muted">Add accounts or holdings to see breakdown.</p>';
+        } else {
+          byEntEl.innerHTML = `<p class="text-sm text-muted mt-2">Cash ${formatAUD(nw.cash)} · Portfolio ${formatAUD(nw.portfolioValue)} · Liabilities ${formatAUD(nw.liabilities)}</p>`;
+        }
+      }
+
       document.getElementById('insightsList').innerHTML = generateInsights().map(i => `<div class="insight ${i.type}">${escapeHtml(i.text)}</div>`).join('');
 
-      const holdings = filteredHoldings();
+      const holdings = filteredHoldings().filter(isMarketHolding);
       const labels = [], values = [];
       const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#64748b','#f97316'];
       holdings.forEach(h => { const val = (h.quantity||0)*(h.currentPrice||0); if (val > 0) { labels.push(h.symbol||'Unknown'); values.push(val); } });
@@ -759,7 +886,7 @@
 
     function renderPortfolio() {
       const list = document.getElementById('holdingsList');
-      const holdings = filteredHoldings();
+      const holdings = filteredHoldings().filter(isMarketHolding);
       if (!holdings.length) list.innerHTML = '<div class="empty"><p>No holdings in this view.</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="openHoldingModal()">Add holding</button></div></div>';
       else list.innerHTML = holdings.map(h => {
         const cost = (h.quantity||0)*(h.avgCost||0), value = (h.quantity||0)*(h.currentPrice||0), pnl = value-cost, pnlPct = cost>0?(pnl/cost)*100:0;
@@ -768,6 +895,11 @@
       const port = calcPortfolio();
       document.getElementById('portTotalCost').textContent = formatAUD(port.totalCost);
       document.getElementById('portMarketValue').textContent = formatAUD(port.totalValue);
+      const portPnL = document.getElementById('portPnL');
+      if (portPnL) {
+        portPnL.textContent = formatAUD(port.pnl) + ' (' + formatPct(port.pnlPct) + ')';
+        portPnL.className = 'metric-value ' + (port.pnl >= 0 ? 'positive' : 'negative');
+      }
     }
 
     function renderSpending() {
@@ -798,6 +930,272 @@
     }
 
 
+
+    function renderAccounts() {
+      const list = document.getElementById('accountsList');
+      if (!list) return;
+      const accounts = filteredAccounts();
+      if (!accounts.length) {
+        list.innerHTML = '<div class="empty"><p>No cash or loan accounts yet.</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="openAccountModal()">Add account</button></div></div>';
+        return;
+      }
+      list.innerHTML = accounts.map(a => {
+        const bal = Number(a.balance) || 0;
+        const isLiab = a.type === 'loan' || a.type === 'credit';
+        return `<div class="list-item" style="cursor:pointer" onclick="editAccount('${a.id}')"><div class="list-item-main"><div class="list-item-title">${escapeHtml(a.name)} <span class="badge badge-${a.type}">${a.type}</span> <span class="badge badge-entity">${escapeHtml(getEntityName(a.entityId))}</span></div><div class="list-item-sub">${escapeHtml(a.notes||a.currency||'AUD')}</div></div><div class="list-item-value ${isLiab?'negative':'positive'}">${isLiab?'−':''}${formatAUD(Math.abs(bal))}</div></div>`;
+      }).join('');
+    }
+    function openAccountModal(id = null) {
+      document.getElementById('accountForm').reset();
+      document.getElementById('accountId').value = '';
+      document.getElementById('deleteAccountBtn').classList.add('hidden');
+      document.getElementById('accountModalTitle').textContent = 'Add Account';
+      populateEntitySelects();
+      if (data.settings.currentEntity !== 'all') document.getElementById('accountEntity').value = data.settings.currentEntity;
+      if (id) {
+        const a = (data.accounts || []).find(x => x.id === id);
+        if (a) {
+          document.getElementById('accountId').value = a.id;
+          document.getElementById('accountEntity').value = a.entityId || 'personal';
+          document.getElementById('accountType').value = a.type || 'cash';
+          document.getElementById('accountName').value = a.name || '';
+          document.getElementById('accountBalance').value = a.balance != null ? a.balance : '';
+          document.getElementById('accountNotes').value = a.notes || '';
+          document.getElementById('accountModalTitle').textContent = 'Edit Account';
+          document.getElementById('deleteAccountBtn').classList.remove('hidden');
+        }
+      }
+      document.getElementById('accountModal').classList.add('open');
+    }
+    function editAccount(id) { openAccountModal(id); }
+    function saveAccount(e) {
+      e.preventDefault();
+      if (!Array.isArray(data.accounts)) data.accounts = [];
+      const id = document.getElementById('accountId').value;
+      const account = {
+        id: id || uid(),
+        entityId: document.getElementById('accountEntity').value,
+        type: document.getElementById('accountType').value,
+        name: document.getElementById('accountName').value.trim(),
+        balance: parseFloat(document.getElementById('accountBalance').value) || 0,
+        currency: 'AUD',
+        notes: document.getElementById('accountNotes').value.trim(),
+        updatedAt: new Date().toISOString()
+      };
+      if (id) { const idx = data.accounts.findIndex(a => a.id === id); if (idx >= 0) data.accounts[idx] = account; }
+      else data.accounts.push(account);
+      saveData(); closeModal('accountModal'); renderAll();
+    }
+    function deleteAccount() {
+      const id = document.getElementById('accountId').value;
+      if (!id || !confirm('Delete this account?')) return;
+      data.accounts = (data.accounts || []).filter(a => a.id !== id);
+      saveData(); closeModal('accountModal'); renderAll();
+    }
+
+    function isUncategorised(t) {
+      if (!t || !(t.amount > 0)) return false;
+      const c = (t.category || '').trim();
+      return !c || c === 'Other' || c.toLowerCase() === 'uncategorised' || c.toLowerCase() === 'uncategorized';
+    }
+    function renderReviewInbox() {
+      const el = document.getElementById('reviewInbox');
+      const countEl = document.getElementById('inboxCount');
+      if (!el) return;
+      const items = filteredTransactions().filter(isUncategorised).sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0, 40);
+      if (countEl) countEl.textContent = items.length ? items.length + ' to review' : '';
+      if (!items.length) { el.innerHTML = '<div class="empty"><p>Inbox clear — nice.</p></div>'; return; }
+      const catOpts = data.categories.filter(c => c !== 'Income' && c !== 'Salary').map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join('');
+      const entOpts = data.entities.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
+      el.innerHTML = items.map(t => {
+        const sug = matchBudgetRule(t.description, t.entityId);
+        const sugCat = sug && sug.category ? sug.category : '';
+        return `<div class="list-item" style="flex-wrap:wrap;align-items:flex-start">
+          <div class="list-item-main" style="cursor:pointer" onclick="editTransaction('${t.id}')">
+            <div class="list-item-title">${escapeHtml(t.description)}</div>
+            <div class="list-item-sub">${t.date} · ${formatAUD(t.amount)} · ${escapeHtml(getEntityName(t.entityId))}${sugCat ? ' · suggest: ' + escapeHtml(sugCat) : ''}</div>
+          </div>
+          <div class="list-item-value negative">−${formatAUD(t.amount)}</div>
+          <div class="inbox-actions w-full">
+            <select id="inboxCat_${t.id}">${catOpts}</select>
+            <select id="inboxEnt_${t.id}">${entOpts}</select>
+            <button type="button" class="btn btn-primary btn-sm" onclick="applyInboxFix('${t.id}')">Apply</button>
+            ${sugCat ? `<button type="button" class="btn btn-secondary btn-sm" onclick="applyInboxSuggest('${t.id}','${escapeHtml(sugCat)}')">Use ${escapeHtml(sugCat)}</button>` : ''}
+          </div>
+        </div>`;
+      }).join('');
+      items.forEach(t => {
+        const sug = matchBudgetRule(t.description, t.entityId);
+        const catSel = document.getElementById('inboxCat_' + t.id);
+        const entSel = document.getElementById('inboxEnt_' + t.id);
+        if (catSel && sug && sug.category && [...catSel.options].some(o => o.value === sug.category)) catSel.value = sug.category;
+        else if (catSel && t.category && [...catSel.options].some(o => o.value === t.category)) catSel.value = t.category;
+        if (entSel) entSel.value = t.entityId || 'personal';
+      });
+    }
+    function applyInboxFix(id) {
+      const t = data.transactions.find(x => x.id === id);
+      if (!t) return;
+      const catSel = document.getElementById('inboxCat_' + id);
+      const entSel = document.getElementById('inboxEnt_' + id);
+      if (catSel) t.category = catSel.value;
+      if (entSel) t.entityId = entSel.value;
+      saveData(); renderAll();
+    }
+    function applyInboxSuggest(id, category) {
+      const t = data.transactions.find(x => x.id === id);
+      if (!t || !category) return;
+      t.category = category;
+      saveData(); renderAll();
+    }
+
+    function descFingerprint(desc) {
+      return String(desc || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\b\d+\b/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 48);
+    }
+    function detectRecurringBills() {
+      const f = data.settings.currentEntity;
+      const txs = data.transactions.filter(t => t.amount > 0 && t.date && (f === 'all' || t.entityId === f));
+      const groups = {};
+      txs.forEach(t => {
+        const fp = descFingerprint(t.description);
+        if (!fp || fp.length < 3) return;
+        const key = t.entityId + '|' + fp;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(t);
+      });
+      const bills = [];
+      Object.keys(groups).forEach(key => {
+        const list = groups[key].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+        const months = new Set(list.map(t => (t.date || '').slice(0, 7)).filter(Boolean));
+        if (months.size < 2 && list.length < 2) return;
+        const amounts = list.map(t => t.amount);
+        const avg = amounts.reduce((s,n)=>s+n,0) / amounts.length;
+        const spread = Math.max(...amounts) - Math.min(...amounts);
+        if (avg > 0 && spread > avg * 0.45 && list.length < 3) return;
+        const last = list[list.length - 1];
+        const lastDate = new Date(last.date + 'T12:00:00');
+        const next = new Date(lastDate);
+        next.setMonth(next.getMonth() + 1);
+        const nextStr = next.toISOString().slice(0, 10);
+        const [entityId, fp] = key.split('|');
+        bills.push({
+          key, entityId, fingerprint: fp,
+          name: last.description || fp,
+          avgAmount: Math.round(avg * 100) / 100,
+          lastDate: last.date,
+          nextDate: nextStr,
+          count: list.length,
+          category: last.category || (matchBudgetRule(last.description, entityId) || {}).category || 'Other'
+        });
+      });
+      return bills.sort((a,b)=>b.avgAmount-a.avgAmount).slice(0, 25);
+    }
+    function renderBills() {
+      const el = document.getElementById('billsList');
+      if (!el) return;
+      const bills = detectRecurringBills();
+      if (!bills.length) { el.innerHTML = '<div class="empty"><p>No recurring patterns yet. Need repeats across months.</p></div>'; return; }
+      el.innerHTML = bills.map(b => `<div class="list-item" style="flex-wrap:wrap">
+        <div class="list-item-main">
+          <div class="list-item-title">${escapeHtml(b.name)}</div>
+          <div class="list-item-sub">Avg ${formatAUD(b.avgAmount)} · last ${b.lastDate} · next ~${b.nextDate} · ${escapeHtml(getEntityName(b.entityId))} · ${b.count}x · ${escapeHtml(b.category)}</div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="pushBillToBudget('${escapeHtml(b.entityId)}','${escapeHtml(b.category)}',${b.avgAmount})">→ Budget</button>
+      </div>`).join('');
+    }
+    function pushBillToBudget(entityId, category, amount) {
+      if (!entityId || !category || !(amount > 0)) return;
+      if (!data.categories.includes(category)) data.categories.push(category);
+      const key = entityId + '|' + category;
+      data.budgets[key] = Math.round(amount * 100) / 100;
+      saveData();
+      const status = document.getElementById('budgetSuggestStatus');
+      if (status) status.textContent = 'Set budget ' + category + ' @ ' + formatAUD(amount) + ' for ' + getEntityName(entityId);
+      renderBudgets();
+      showSection('budgets');
+    }
+
+    function parseTagsInput(str) {
+      return String(str || '').split(',').map(s => s.trim()).filter(Boolean);
+    }
+    function csvEscape(v) {
+      const s = v == null ? '' : String(v);
+      if (/[",\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    function dataUrlToUint8Array(dataUrl) {
+      const m = String(dataUrl).match(/^data:([^;]+);base64,(.+)$/);
+      if (!m) return null;
+      const bin = atob(m[2]);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return { mime: m[1], bytes: out, ext: m[1].includes('png') ? 'png' : (m[1].includes('pdf') ? 'pdf' : 'jpg') };
+    }
+    async function exportForXero(asZip) {
+      const status = document.getElementById('xeroExportStatus');
+      const from = (document.getElementById('xeroFromDate') || {}).value || '';
+      const to = (document.getElementById('xeroToDate') || {}).value || '';
+      let txs = data.transactions.filter(t => t.amount > 0 && t.date);
+      if (from) txs = txs.filter(t => t.date >= from);
+      if (to) txs = txs.filter(t => t.date <= to);
+      txs = txs.sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+      const header = ['Date','Amount','Description','Entity','Category','GST','ABN','HasReceipt','Tags','TxId'];
+      const rows = [header.join(',')];
+      txs.forEach(t => {
+        const tags = Array.isArray(t.tags) ? t.tags.join(';') : '';
+        rows.push([
+          csvEscape(t.date),
+          csvEscape(Number(t.amount).toFixed(2)),
+          csvEscape(t.description || ''),
+          csvEscape(getEntityName(t.entityId)),
+          csvEscape(t.category || ''),
+          csvEscape(t.gstAmount != null && t.gstAmount !== '' ? Number(t.gstAmount).toFixed(2) : ''),
+          csvEscape(t.abn || ''),
+          t.thumbnail ? 'Y' : 'N',
+          csvEscape(tags),
+          csvEscape(t.id)
+        ].join(','));
+      });
+      const csvText = rows.join('\n');
+      if (!asZip) {
+        const blob = new Blob([csvText], { type: 'text/csv' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'vault-xero-reconcile-' + today() + '.csv';
+        a.click();
+        if (status) status.textContent = 'CSV downloaded (' + txs.length + ' expenses). For reconcile in Xero — not a Xero replacement.';
+        return;
+      }
+      if (typeof JSZip === 'undefined') {
+        if (status) status.textContent = 'JSZip not loaded — downloading CSV only. Attach receipts manually.';
+        await exportForXero(false);
+        return;
+      }
+      try {
+        if (status) status.textContent = 'Building ZIP…';
+        const zip = new JSZip();
+        zip.file('vault-xero-reconcile.csv', csvText);
+        const folder = zip.folder('receipts');
+        let receiptCount = 0;
+        for (const t of txs) {
+          if (!t.thumbnail) continue;
+          const parsed = dataUrlToUint8Array(t.thumbnail);
+          if (!parsed) continue;
+          const fname = 'receipt-' + (t.date || 'nodate') + '-' + t.id + '.' + parsed.ext;
+          folder.file(fname, parsed.bytes);
+          receiptCount++;
+        }
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'vault-xero-package-' + today() + '.zip';
+        a.click();
+        if (status) status.textContent = 'ZIP ready: ' + txs.length + ' expenses, ' + receiptCount + ' receipt(s). For reconcile in Xero — not a Xero replacement.';
+      } catch (err) {
+        console.error(err);
+        if (status) status.textContent = 'ZIP failed (' + (err.message || 'error') + ') — try CSV only.';
+      }
+    }
 
     function matchBudgetRule(desc, entityId) {
       const d = desc || '';
@@ -1137,6 +1535,9 @@
       if (data.settings.currentEntity !== 'all') document.getElementById('txEntity').value = data.settings.currentEntity;
       document.getElementById('txCategory').innerHTML = data.categories.map(c => `<option value="${c}">${c}</option>`).join('');
       clearTxReceipt();
+      document.getElementById('txTags').value = '';
+      document.getElementById('txGst').value = '';
+      document.getElementById('txAbn').value = '';
       const st = document.getElementById('txReceiptStatus');
       if (st) st.textContent = '';
       if (id) {
@@ -1148,6 +1549,9 @@
           document.getElementById('txDesc').value = t.description || '';
           document.getElementById('txAmount').value = t.amount || '';
           document.getElementById('txCategory').value = t.category || 'Other';
+          document.getElementById('txTags').value = Array.isArray(t.tags) ? t.tags.join(', ') : (t.tags || '');
+          document.getElementById('txGst').value = t.gstAmount != null ? t.gstAmount : '';
+          document.getElementById('txAbn').value = t.abn || '';
           document.getElementById('transactionModalTitle').textContent = 'Edit Transaction';
           document.getElementById('deleteTxBtn').classList.remove('hidden');
           if (t.thumbnail && String(t.thumbnail).startsWith('data:image')) {
@@ -1166,15 +1570,29 @@
     function saveTransaction(e) {
       e.preventDefault();
       const id = document.getElementById('txId').value;
+      const gstRaw = document.getElementById('txGst').value;
+      const gstAmount = gstRaw === '' || gstRaw == null ? undefined : parseFloat(gstRaw);
+      const abn = document.getElementById('txAbn').value.trim();
+      const tags = parseTagsInput(document.getElementById('txTags').value);
       const tx = {
         id: id || uid(),
         entityId: document.getElementById('txEntity').value,
         date: document.getElementById('txDate').value,
         description: document.getElementById('txDesc').value.trim(),
         amount: parseFloat(document.getElementById('txAmount').value) || 0,
-        category: document.getElementById('txCategory').value
+        category: document.getElementById('txCategory').value,
+        tags
       };
-      if (pendingTxReceipt) tx.thumbnail = pendingTxReceipt;
+      if (gstAmount != null && !isNaN(gstAmount)) tx.gstAmount = gstAmount;
+      if (abn) tx.abn = abn;
+      if (pendingTxReceipt) {
+        tx.thumbnail = pendingTxReceipt;
+      } else if (id) {
+        const prev = data.transactions.find(t => t.id === id);
+        const wrap = document.getElementById('txReceiptPreviewWrap');
+        // Keep existing receipt unless user removed it (wrap hidden + pending null)
+        if (prev && prev.thumbnail && wrap && !wrap.classList.contains('hidden')) tx.thumbnail = prev.thumbnail;
+      }
       if (id) { const idx = data.transactions.findIndex(t => t.id === id); if (idx >= 0) data.transactions[idx] = tx; }
       else data.transactions.push(tx);
       pendingTxReceipt = null;
@@ -1246,6 +1664,7 @@
       const fallback = data.entities.find(e => e.id !== id)?.id || 'personal';
       data.holdings.forEach(h => { if (h.entityId === id) h.entityId = fallback; });
       data.transactions.forEach(t => { if (t.entityId === id) t.entityId = fallback; });
+      (data.accounts || []).forEach(a => { if (a.entityId === id) a.entityId = fallback; });
       Object.keys(data.budgets).forEach(k => { if (k.startsWith(id+'|')) delete data.budgets[k]; });
       data.entities = data.entities.filter(e => e.id !== id);
       if (data.settings.currentEntity === id) data.settings.currentEntity = 'all';
@@ -1329,11 +1748,12 @@
           if (!confirm('Replace ALL Vault data on this device with this backup?')) return;
           data = {
             entities: (parsed.entities && parsed.entities.length) ? parsed.entities : JSON.parse(JSON.stringify(DEFAULT_ENTITIES)),
-            holdings: parsed.holdings || [],
-            transactions: parsed.transactions || [],
-            budgets: parsed.budgets || {},
+            holdings: Array.isArray(parsed.holdings) ? parsed.holdings : [],
+            transactions: Array.isArray(parsed.transactions) ? parsed.transactions : [],
+            budgets: (parsed.budgets && typeof parsed.budgets === 'object') ? parsed.budgets : {},
+            accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
             budgetTraining: Array.isArray(parsed.budgetTraining) ? parsed.budgetTraining : [],
-            categories: (parsed.categories && parsed.categories.length) ? parsed.categories : [...DEFAULT_CATEGORIES],
+            categories: mergeCategories(parsed.categories),
             settings: {
               theme: (parsed.settings && parsed.settings.theme) || data.settings.theme || 'dark',
               currentEntity: (parsed.settings && parsed.settings.currentEntity) || 'all',
@@ -1343,11 +1763,18 @@
               aiModel: (parsed.settings && parsed.settings.aiModel) || 'gpt-4o-mini'
             }
           };
+          data.holdings.forEach(h => { if (!h.entityId) h.entityId = 'personal'; });
+          data.accounts.forEach(a => { if (!a.entityId) a.entityId = 'personal'; if (!a.currency) a.currency = 'AUD'; });
+          data.transactions.forEach(t => {
+            if (!t.entityId) t.entityId = 'personal';
+            if (!Array.isArray(t.tags)) t.tags = t.tags ? String(t.tags).split(',').map(s => s.trim()).filter(Boolean) : [];
+          });
           saveData();
           populateEntitySelects();
+          populateAiSettingsForm();
           renderAll();
           updateOnboarding();
-          if (status) status.textContent = `Restored ${data.holdings.length} holding(s), ${data.transactions.length} transaction(s).`;
+          if (status) status.textContent = `Restored ${data.holdings.length} holding(s), ${data.transactions.length} transaction(s), ${data.accounts.length} account(s).`;
         } catch (e) {
           console.error(e);
           if (status) status.textContent = 'Restore failed: ' + (e.message || 'invalid file');
@@ -1361,15 +1788,19 @@
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `vault-backup-${today()}.json`; a.click();
     }
     function exportCSV() {
-      let csv = 'Type,Entity,Date,Symbol/Description,Quantity,Amount,Category,Notes\n';
-      data.holdings.forEach(h => { csv += `Holding,${getEntityName(h.entityId)},${h.updatedAt||''},${h.symbol},${h.quantity},${h.currentPrice},,"${(h.notes||'').replace(/"/g,'""')}"\n`; });
-      data.transactions.forEach(t => { csv += `Transaction,${getEntityName(t.entityId)},${t.date},"${(t.description||'').replace(/"/g,'""')}",,${t.amount},${t.category},\n`; });
+      let csv = 'Type,Entity,Date,Symbol/Description,Quantity,Amount,Category,GST,ABN,Tags,Notes\n';
+      data.holdings.forEach(h => { csv += `Holding,${csvEscape(getEntityName(h.entityId))},${csvEscape(h.updatedAt||'')},${csvEscape(h.symbol)},${h.quantity},${h.currentPrice},,,,,${csvEscape(h.notes||'')}\n`; });
+      (data.accounts || []).forEach(a => { csv += `Account,${csvEscape(getEntityName(a.entityId))},${csvEscape(a.updatedAt||'')},${csvEscape(a.name)},,${a.balance},${csvEscape(a.type)},,,,\n`; });
+      data.transactions.forEach(t => {
+        const tags = Array.isArray(t.tags) ? t.tags.join(';') : '';
+        csv += `Transaction,${csvEscape(getEntityName(t.entityId))},${csvEscape(t.date)},${csvEscape(t.description||'')},,${t.amount},${csvEscape(t.category)},${t.gstAmount!=null?t.gstAmount:''},${csvEscape(t.abn||'')},${csvEscape(tags)},\n`;
+      });
       const blob = new Blob([csv], { type: 'text/csv' });
       const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `vault-export-${today()}.csv`; a.click();
     }
     function clearAllData() {
       if (!confirm('Permanently delete all data?') || !confirm('Really sure?')) return;
-      data = { entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)), holdings: [], transactions: [], budgets: {}, categories: [...DEFAULT_CATEGORIES], settings: { theme: data.settings.theme, currentEntity: 'all', onboardingDismissed: data.settings.onboardingDismissed, aiApiBase: data.settings.aiApiBase||'', aiApiKey: data.settings.aiApiKey||'', aiModel: data.settings.aiModel||'gpt-4o-mini' } };
+      data = { entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)), holdings: [], transactions: [], budgets: {}, accounts: [], budgetTraining: [], categories: [...DEFAULT_CATEGORIES], settings: { theme: data.settings.theme, currentEntity: 'all', onboardingDismissed: data.settings.onboardingDismissed, aiApiBase: data.settings.aiApiBase||'', aiApiKey: data.settings.aiApiKey||'', aiModel: data.settings.aiModel||'gpt-4o-mini' } };
       saveData(); populateEntitySelects(); renderAll(); alert('All data cleared.');
     }
     function calcDCA() {
@@ -1394,7 +1825,9 @@
         thumb = `<span class="receipt-thumb" style="display:inline-flex;align-items:center;justify-content:center;font-size:11px;background:var(--card);">PDF</span>`;
       }
       const click = clickable ? ` style="cursor:pointer" onclick="editTransaction('${t.id}')"` : '';
-      return `<div class="list-item"${click}><div class="list-item-main"><div class="list-item-title">${thumb}${escapeHtml(t.description)}</div><div class="list-item-sub">${t.date} · ${t.category} · ${getEntityName(t.entityId)}</div></div><div class="list-item-value ${t.amount>0?'negative':'positive'}">${t.amount>0?'-':'+'}${formatAUD(Math.abs(t.amount))}</div></div>`;
+      const tagHtml = (Array.isArray(t.tags) && t.tags.length) ? ' ' + t.tags.map(tg => `<span class="tag-chip">${escapeHtml(tg)}</span>`).join('') : '';
+      const gstBit = (t.gstAmount != null && t.gstAmount !== '') ? ` · GST ${formatAUD(t.gstAmount)}` : '';
+      return `<div class="list-item"${click}><div class="list-item-main"><div class="list-item-title">${thumb}${escapeHtml(t.description)}${tagHtml}</div><div class="list-item-sub">${t.date} · ${escapeHtml(t.category||'')} · ${escapeHtml(getEntityName(t.entityId))}${gstBit}</div></div><div class="list-item-value ${t.amount>0?'negative':'positive'}">${t.amount>0?'-':'+'}${formatAUD(Math.abs(t.amount))}</div></div>`;
     }
 
     function updateOnboarding() {
