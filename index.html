@@ -214,8 +214,13 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">Monthly Budgets</div>
-          <button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Edit</button>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" onclick="suggestBudgetsFromTransactions()">Suggest from bills</button>
+            <button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Edit</button>
+          </div>
         </div>
+        <p class="text-sm text-muted mb-2">Suggest pulls clear repeats (power, gas, phone, mortgage/loan, fuel) from your transactions into monthly budgets. You confirm before anything is saved.</p>
+        <div id="budgetSuggestStatus" class="status-msg text-muted"></div>
         <div id="budgetsList"></div>
       </div>
     </section>
@@ -385,6 +390,7 @@
   <div class="modal-overlay" id="entityModal">
     <div class="modal">
       <div class="modal-header"><div class="modal-title">Manage Entities</div><button class="close-btn" onclick="closeModal('entityModal')">×</button></div>
+      <p class="text-sm text-muted mb-2">Use ↑ ↓ to rearrange. Order shows in filters and lists.</p>
       <div id="entityManageList"></div>
       <hr style="border-color:var(--border); margin:16px 0;" />
       <form id="entityForm" onsubmit="saveEntity(event)">
@@ -398,7 +404,7 @@
   </div>
 
   <script>
-    const DEFAULT_CATEGORIES = ['Housing','Food','Transport','Fuel','Utilities','Entertainment','Subscriptions','Health','Investing','Personal','Tools','Materials','Subcontractors','Income','Other'];
+    const DEFAULT_CATEGORIES = ['Housing','Food','Transport','Fuel','Utilities','Phone','Entertainment','Subscriptions','Health','Investing','Personal','Tools','Materials','Subcontractors','Income','Other'];
     const DEFAULT_ENTITIES = [
       { id: 'personal', name: 'Personal', type: 'personal' },
       { id: 'business', name: 'Business', type: 'company' },
@@ -753,6 +759,89 @@
       }
     }
 
+
+    const BILL_RULES = [
+      { category: 'Housing', label: 'Mortgage / loan', test: (d) => /\b(loan payment|mortgage|home\s*loan|plenti|homeloan)\b/i.test(d) && !/\binterest\b/i.test(d) },
+      { category: 'Utilities', label: 'Electricity', test: (d) => /\b(synergy|agl|alinta|origin energy|simply energy|electric|elec bill|powerbill|western power)\b/i.test(d) },
+      { category: 'Utilities', label: 'Gas bill', test: (d) => /\b(kleenheat|gas bill|natural gas|origin gas|agl gas)\b/i.test(d) || (/\bgas\b/i.test(d) && !/\b(fuel|unleaded|diesel|petrol|servo)\b/i.test(d)) },
+      { category: 'Phone', label: 'Phone', test: (d) => /\b(telstra|optus|vodafone|amaysim|belong|boost mobile|phone bill|mobile plan)\b/i.test(d) },
+      { category: 'Fuel', label: 'Fuel / servo', test: (d) => /\b(fuel|petrol|diesel|unleaded|caltex|shell|bp\b|ampol|7-eleven|mobil|united petroleum|puma energy)\b/i.test(d) }
+    ];
+
+    function median(nums) {
+      if (!nums.length) return 0;
+      const a = [...nums].sort((x,y)=>x-y);
+      const m = Math.floor(a.length/2);
+      return a.length % 2 ? a[m] : (a[m-1]+a[m])/2;
+    }
+
+    function suggestBudgetsFromTransactions() {
+      const status = document.getElementById('budgetSuggestStatus');
+      const entityFilter = data.settings.currentEntity;
+      const txs = data.transactions.filter(t => t.amount > 0 && t.date && (entityFilter === 'all' || t.entityId === entityFilter));
+      if (!txs.length) {
+        if (status) status.textContent = 'No expense transactions to scan for this view.';
+        return;
+      }
+
+      // Per entity + category: group by YYYY-MM then median monthly total
+      const byEntCatMonth = {};
+      const matchedLabels = {};
+      txs.forEach(t => {
+        const desc = t.description || '';
+        const rule = BILL_RULES.find(r => r.test(desc));
+        if (!rule) return;
+        const month = t.date.slice(0, 7);
+        const key = t.entityId + '|' + rule.category;
+        matchedLabels[key] = matchedLabels[key] || new Set();
+        matchedLabels[key].add(rule.label);
+        byEntCatMonth[key] = byEntCatMonth[key] || {};
+        byEntCatMonth[key][month] = (byEntCatMonth[key][month] || 0) + t.amount;
+      });
+
+      const suggestions = [];
+      Object.keys(byEntCatMonth).forEach(key => {
+        const months = Object.values(byEntCatMonth[key]);
+        if (!months.length) return;
+        const amount = Math.round(median(months) * 100) / 100;
+        if (amount < 1) return;
+        const [entityId, category] = key.split('|');
+        suggestions.push({
+          key,
+          entityId,
+          category,
+          amount,
+          months: months.length,
+          labels: [...(matchedLabels[key] || [])].join(', '),
+          existing: Number(data.budgets[key]) || 0
+        });
+      });
+
+      if (!suggestions.length) {
+        if (status) status.textContent = 'Nothing clear enough (gas/power/phone/mortgage/fuel) in this view yet.';
+        return;
+      }
+
+      const lines = suggestions.map(s =>
+        `${getEntityName(s.entityId)} · ${s.category} (${s.labels}): $${s.amount.toFixed(2)}/mo from ${s.months} month(s)` +
+        (s.existing ? ` — currently $${s.existing.toFixed(2)}` : '')
+      ).join('\n');
+
+      if (!confirm('Apply these monthly budget amounts?\n\n' + lines + '\n\nExisting values for those categories will be replaced. Others stay.')) {
+        if (status) status.textContent = 'Suggestion cancelled.';
+        return;
+      }
+
+      // Ensure Phone category exists
+      if (!data.categories.includes('Phone')) data.categories.splice(data.categories.indexOf('Subscriptions') >= 0 ? data.categories.indexOf('Subscriptions') : data.categories.length, 0, 'Phone');
+
+      suggestions.forEach(s => { data.budgets[s.key] = s.amount; });
+      saveData();
+      renderBudgets();
+      if (typeof populateCategorySelects === "function") populateCategorySelects(); else { const sel=document.getElementById("txCategory"); if(sel) sel.innerHTML=data.categories.map(c=>`<option value="${c}">${escapeHtml(c)}</option>`).join(""); }
+      if (status) status.textContent = `Applied ${suggestions.length} budget line(s) from bills.`;
+    }
+
     function renderBudgets() {
       const monthKey = currentMonthKey();
       const list = document.getElementById('budgetsList');
@@ -774,7 +863,22 @@
     }
 
     function renderEntitiesList() {
-      document.getElementById('entitiesList').innerHTML = data.entities.map(e => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${escapeHtml(e.name)}</div><div class="list-item-sub">${e.type}</div></div></div>`).join('') || '<div class="empty"><p>No entities</p></div>';
+      document.getElementById('entitiesList').innerHTML = data.entities.map((e, i) => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${escapeHtml(e.name)}</div><div class="list-item-sub">${escapeHtml(e.type)} · #${i+1}</div></div><div class="flex gap-2"><button class="btn btn-secondary btn-sm" onclick="moveEntity('${e.id}',-1)" ${i===0?'disabled':''}>↑</button><button class="btn btn-secondary btn-sm" onclick="moveEntity('${e.id}',1)" ${i===data.entities.length-1?'disabled':''}>↓</button></div></div>`).join('') || '<div class="empty"><p>No entities</p></div>';
+    }
+
+    function moveEntity(id, dir) {
+      const idx = data.entities.findIndex(e => e.id === id);
+      if (idx < 0) return;
+      const j = idx + dir;
+      if (j < 0 || j >= data.entities.length) return;
+      const tmp = data.entities[idx];
+      data.entities[idx] = data.entities[j];
+      data.entities[j] = tmp;
+      saveData();
+      populateEntitySelects();
+      renderEntitiesList();
+      if (document.getElementById('entityModal').classList.contains('open')) renderEntityManageList();
+      renderAll();
     }
 
     function openHoldingModal(id = null) {
@@ -907,7 +1011,7 @@
 
     function openEntityModal() { renderEntityManageList(); resetEntityForm(); document.getElementById('entityModal').classList.add('open'); }
     function renderEntityManageList() {
-      document.getElementById('entityManageList').innerHTML = data.entities.map(e => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${escapeHtml(e.name)}</div><div class="list-item-sub">${e.type}</div></div><div class="flex gap-2"><button class="btn btn-secondary btn-sm" onclick="editEntity('${e.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteEntity('${e.id}')">Del</button></div></div>`).join('');
+      document.getElementById('entityManageList').innerHTML = data.entities.map((e, i) => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${escapeHtml(e.name)}</div><div class="list-item-sub">${escapeHtml(e.type)}</div></div><div class="flex gap-2"><button type="button" class="btn btn-secondary btn-sm" onclick="moveEntity('${e.id}',-1)" ${i===0?'disabled':''}>↑</button><button type="button" class="btn btn-secondary btn-sm" onclick="moveEntity('${e.id}',1)" ${i===data.entities.length-1?'disabled':''}>↓</button><button type="button" class="btn btn-secondary btn-sm" onclick="editEntity('${e.id}')">Edit</button><button type="button" class="btn btn-danger btn-sm" onclick="deleteEntity('${e.id}')">Del</button></div></div>`).join('');
     }
     function editEntity(id) {
       const e = data.entities.find(x => x.id === id);
