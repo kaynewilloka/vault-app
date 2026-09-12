@@ -108,6 +108,7 @@
     .modal-title { font-size: 1.15rem; font-weight: 700; }
     .close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; line-height: 1; }
     .chart-container { position: relative; height: 220px; margin: 12px 0; }
+    .chart-lg { height: 260px; }
     .empty { text-align: center; padding: 28px 16px; color: var(--text-muted); }
     .empty p { margin-top: 8px; font-size: 0.9rem; }
     .text-muted { color: var(--text-muted); }
@@ -233,6 +234,16 @@
         <div id="allocationLegend" class="text-sm"></div>
       </div>
       <div class="card">
+        <div class="card-header"><div class="card-title">Investment Trends</div></div>
+        <p class="text-sm text-muted mb-2">Stocks vs crypto totals. Trend line grows each day you refresh prices (seeded with cost basis if no history yet).</p>
+        <div class="metrics-grid" style="margin-bottom:8px">
+          <div class="metric"><div class="metric-label">Stocks</div><div class="metric-value" id="investStocksTotal">$0</div></div>
+          <div class="metric"><div class="metric-label">Crypto</div><div class="metric-value" id="investCryptoTotal">$0</div></div>
+        </div>
+        <div class="chart-container chart-lg"><canvas id="investTrendChart"></canvas></div>
+        <div class="chart-container" style="height:180px"><canvas id="investSplitChart"></canvas></div>
+      </div>
+      <div class="card">
         <div class="card-header"><div class="card-title">Recent Activity</div></div>
         <div id="recentActivity"></div>
       </div>
@@ -304,6 +315,12 @@
         <div class="card-header"><div class="card-title">Bills / Recurring</div></div>
         <p class="text-sm text-muted mb-2">Detected from repeated expenses (same fingerprint + similar amount).</p>
         <div id="billsList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Bills Charts</div></div>
+        <p class="text-sm text-muted mb-2">Recurring bill averages vs monthly total expenses.</p>
+        <div class="chart-container chart-lg"><canvas id="recurringBillsChart"></canvas></div>
+        <div class="chart-container chart-lg" style="margin-top:12px"><canvas id="monthlyBillsChart"></canvas></div>
       </div>
       <div class="card">
         <div class="card-header"><div class="card-title">Spending by Category</div></div>
@@ -404,6 +421,7 @@
   <div class="disclaimer">
     Ledger is a personal tracking tool only. It does not provide financial, investment or tax advice.
     Past performance is not indicative of future results. Always do your own research.
+    <div class="text-sm" style="margin-top:8px;opacity:0.8">Build 20260912-charts</div>
   </div>
 
   <nav>
@@ -600,10 +618,11 @@
       holdings: [], transactions: [], budgets: {},
       accounts: [],
       budgetTraining: [],
+      valueHistory: [],
       categories: [...DEFAULT_CATEGORIES],
       settings: { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini' }
     };
-    let allocationChart = null, spendChart = null;
+    let allocationChart = null, spendChart = null, investTrendChart = null, investSplitChart = null, recurringBillsChart = null, monthlyBillsChart = null;
 
     function mergeCategories(existing) {
       const set = [];
@@ -622,6 +641,7 @@
           if (!Array.isArray(data.accounts)) data.accounts = [];
           if (!Array.isArray(data.holdings)) data.holdings = [];
           if (!Array.isArray(data.transactions)) data.transactions = [];
+          if (!Array.isArray(data.valueHistory)) data.valueHistory = [];
           if (!data.budgets || typeof data.budgets !== 'object') data.budgets = {};
           data.categories = mergeCategories(data.categories);
           data.holdings.forEach(h => { if (!h.entityId) h.entityId = 'personal'; });
@@ -697,6 +717,35 @@
       let totalCost = 0, totalValue = 0;
       list.forEach(h => { totalCost += (h.quantity||0)*(h.avgCost||0); totalValue += (h.quantity||0)*(h.currentPrice||0); });
       return { totalCost, totalValue, pnl: totalValue - totalCost, pnlPct: totalCost > 0 ? ((totalValue-totalCost)/totalCost)*100 : 0 };
+    }
+    function portfolioSplit(holdings = null) {
+      const list = (holdings || filteredHoldings()).filter(isMarketHolding);
+      let stocks = 0, crypto = 0, stocksCost = 0, cryptoCost = 0;
+      list.forEach(h => {
+        const v = (h.quantity||0)*(h.currentPrice||0);
+        const c = (h.quantity||0)*(h.avgCost||0);
+        if (h.type === 'crypto') { crypto += v; cryptoCost += c; }
+        else { stocks += v; stocksCost += c; }
+      });
+      return { stocks, crypto, total: stocks+crypto, stocksCost, cryptoCost, cost: stocksCost+cryptoCost };
+    }
+    function recordValueSnapshot(force) {
+      const split = portfolioSplit(data.holdings);
+      if (split.total <= 0 && split.cost <= 0) return;
+      if (!Array.isArray(data.valueHistory)) data.valueHistory = [];
+      const day = new Date().toISOString().slice(0,10);
+      const last = data.valueHistory[data.valueHistory.length-1];
+      if (!data.valueHistory.length && split.cost > 0) {
+        data.valueHistory.push({ d: day, stocks: split.stocksCost, crypto: split.cryptoCost, total: split.cost, note: 'cost' });
+      }
+      if (last && last.d === day && !force) {
+        last.stocks = split.stocks; last.crypto = split.crypto; last.total = split.total; delete last.note;
+      } else if (!last || last.d !== day || force) {
+        if (last && last.d === day) { last.stocks = split.stocks; last.crypto = split.crypto; last.total = split.total; delete last.note; }
+        else data.valueHistory.push({ d: day, stocks: split.stocks, crypto: split.crypto, total: split.total });
+      }
+      if (data.valueHistory.length > 365) data.valueHistory = data.valueHistory.slice(-365);
+      saveData();
     }
     function calcNetWorth(entityFilter) {
       const f = entityFilter != null ? entityFilter : data.settings.currentEntity;
@@ -872,6 +921,7 @@
           updated++;
         }
         saveData();
+        recordValueSnapshot();
         const extra = failed ? ` (${failed} symbol(s) not found — check tickers, e.g. BHP.AX)` : '';
         status.textContent = updated ? `Updated ${updated} stock price(s) in AUD.${extra}` : `No stock prices updated.${extra}`;
         renderPortfolio(); renderDashboard();
@@ -905,6 +955,7 @@
           if (cgId && prices[cgId]?.aud) { h.currentPrice = prices[cgId].aud; h.updatedAt = new Date().toISOString(); updated++; }
         });
         saveData();
+        recordValueSnapshot();
         status.textContent = `Updated ${updated} crypto price(s) in AUD.`;
         renderPortfolio(); renderDashboard();
       } catch (err) {
@@ -1051,9 +1102,168 @@
         document.getElementById('allocationLegend').innerHTML = labels.map((l,i) => `<div class="flex justify-between text-sm" style="margin:4px 0"><span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colors[i]};margin-right:6px"></span>${escapeHtml(l)}</span><span>${((values[i]/totalVal)*100).toFixed(1)}%</span></div>`).join('');
       }
 
+      recordValueSnapshot();
+      renderInvestCharts();
+
       const recent = [...filteredTransactions()].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5);
       const recentEl = document.getElementById('recentActivity');
       recentEl.innerHTML = recent.length ? recent.map(t => renderTxRow(t,false)).join('') : '<div class="empty"><p>No transactions yet</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="showSection(\'spending\'); document.getElementById(\'receiptFile\').click();">Scan a receipt</button><button class="btn btn-secondary btn-sm" onclick="openTransactionModal()">Add manually</button></div></div>';
+    }
+
+    function chartTickColor() { return '#94a3b8'; }
+    function resetChartCanvas(canvasId, emptyMsg) {
+      const el = document.getElementById(canvasId);
+      const wrap = el && el.parentElement;
+      if (!wrap) return null;
+      if (emptyMsg) {
+        wrap.innerHTML = '<div class="empty"><p>' + escapeHtml(emptyMsg) + '</p></div><canvas id="' + canvasId + '" style="display:none"></canvas>';
+        return null;
+      }
+      wrap.innerHTML = '<canvas id="' + canvasId + '"></canvas>';
+      return document.getElementById(canvasId);
+    }
+    function renderInvestCharts() {
+      const split = portfolioSplit();
+      const stocksEl = document.getElementById('investStocksTotal');
+      const cryptoEl = document.getElementById('investCryptoTotal');
+      if (stocksEl) stocksEl.textContent = formatAUD(split.stocks);
+      if (cryptoEl) cryptoEl.textContent = formatAUD(split.crypto);
+
+      if (investTrendChart) { investTrendChart.destroy(); investTrendChart = null; }
+      if (investSplitChart) { investSplitChart.destroy(); investSplitChart = null; }
+
+      const hist = Array.isArray(data.valueHistory) ? data.valueHistory : [];
+      if (!document.getElementById('investTrendChart') || !document.getElementById('investSplitChart')) return;
+
+      if (split.total <= 0 && !hist.length) {
+        resetChartCanvas('investTrendChart', 'No holdings to chart yet');
+        resetChartCanvas('investSplitChart', 'Add stocks or crypto to see split');
+        return;
+      }
+
+      const tick = chartTickColor();
+      if (hist.length) {
+        const tc = resetChartCanvas('investTrendChart');
+        if (tc) {
+          investTrendChart = new Chart(tc, {
+            type: 'line',
+            data: {
+              labels: hist.map(p => p.d),
+              datasets: [
+                { label: 'Total', data: hist.map(p => p.total), borderColor: '#38bdf8', backgroundColor: 'rgba(56,189,248,0.15)', tension: 0.25, fill: true, pointRadius: 2 },
+                { label: 'Stocks', data: hist.map(p => p.stocks), borderColor: '#94a3b8', backgroundColor: 'transparent', tension: 0.25, fill: false, pointRadius: 0 },
+                { label: 'Crypto', data: hist.map(p => p.crypto), borderColor: '#38bdf8', borderDash: [4,3], backgroundColor: 'transparent', tension: 0.25, fill: false, pointRadius: 0 }
+              ]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              interaction: { mode: 'index', intersect: false },
+              plugins: { legend: { labels: { color: tick } }, tooltip: { callbacks: { label: c => c.dataset.label + ': ' + formatAUD(c.raw) } } },
+              scales: {
+                x: { ticks: { color: tick, maxTicksLimit: 8 }, grid: { color: 'rgba(148,163,184,0.12)' } },
+                y: { ticks: { color: tick, callback: v => formatAUD(v) }, grid: { color: 'rgba(148,163,184,0.12)' } }
+              }
+            }
+          });
+        }
+      } else {
+        resetChartCanvas('investTrendChart', 'Refresh prices to start the trend');
+      }
+
+      if (split.stocks > 0 || split.crypto > 0) {
+        const sc = resetChartCanvas('investSplitChart');
+        if (sc) {
+          investSplitChart = new Chart(sc, {
+            type: 'doughnut',
+            data: {
+              labels: ['Stocks', 'Crypto'],
+              datasets: [{ data: [split.stocks, split.crypto], backgroundColor: ['#94a3b8', '#38bdf8'], borderWidth: 0 }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'bottom', labels: { color: tick } },
+                tooltip: { callbacks: { label: c => { const tot = c.dataset.data.reduce((a,b)=>a+b,0)||1; return c.label + ': ' + formatAUD(c.raw) + ' (' + ((c.raw/tot)*100).toFixed(1) + '%)'; } } }
+              }
+            }
+          });
+        }
+      } else {
+        resetChartCanvas('investSplitChart', 'No market value in this view');
+      }
+    }
+
+    function renderBillCharts() {
+      if (recurringBillsChart) { recurringBillsChart.destroy(); recurringBillsChart = null; }
+      if (monthlyBillsChart) { monthlyBillsChart.destroy(); monthlyBillsChart = null; }
+      if (!document.getElementById('recurringBillsChart') || !document.getElementById('monthlyBillsChart')) return;
+
+      const tick = chartTickColor();
+      const bills = detectRecurringBills().slice(0, 12);
+      if (!bills.length) {
+        resetChartCanvas('recurringBillsChart', 'No recurring bills detected yet');
+      } else {
+        const recCanvas = resetChartCanvas('recurringBillsChart');
+        if (recCanvas) {
+          const labels = bills.map(b => {
+            const n = String(b.name || 'Bill');
+            return n.length > 28 ? n.slice(0, 26) + '\u2026' : n;
+          });
+          recurringBillsChart = new Chart(recCanvas, {
+            type: 'bar',
+            data: {
+              labels,
+              datasets: [{ label: 'Avg amount', data: bills.map(b => b.avgAmount), backgroundColor: '#38bdf8', borderRadius: 4 }]
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => formatAUD(c.raw) } } },
+              scales: {
+                x: { ticks: { color: tick, callback: v => formatAUD(v) }, grid: { color: 'rgba(148,163,184,0.12)' } },
+                y: { ticks: { color: tick, font: { size: 10 } }, grid: { display: false } }
+              }
+            }
+          });
+        }
+      }
+
+      const months = [];
+      const now = new Date();
+      for (let i = 7; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+        const label = d.toLocaleString('en-AU', { month: 'short', year: '2-digit' });
+        months.push({ key, label });
+      }
+      const txs = filteredTransactions().filter(t => t.amount > 0 && t.date && !isTransferTx(t));
+      const monthTotals = months.map(m => {
+        let sum = 0;
+        txs.forEach(t => { if ((t.date || '').startsWith(m.key)) sum += t.amount; });
+        return sum;
+      });
+      if (monthTotals.every(v => v <= 0)) {
+        resetChartCanvas('monthlyBillsChart', 'No monthly expenses to chart');
+      } else {
+        const monCanvas = resetChartCanvas('monthlyBillsChart');
+        if (monCanvas) {
+          monthlyBillsChart = new Chart(monCanvas, {
+            type: 'bar',
+            data: {
+              labels: months.map(m => m.label),
+              datasets: [{ label: 'Expenses', data: monthTotals, backgroundColor: '#f87171', borderRadius: 4 }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => formatAUD(c.raw) } } },
+              scales: {
+                x: { ticks: { color: tick }, grid: { display: false } },
+                y: { ticks: { color: tick, callback: v => formatAUD(v) }, grid: { color: 'rgba(148,163,184,0.12)' } }
+              }
+            }
+          });
+        }
+      }
     }
 
     function renderPortfolio() {
@@ -1122,6 +1332,7 @@
           options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: getComputedStyle(document.body).getPropertyValue('--text'), boxWidth: 12, padding: 10 } }, tooltip: { callbacks: { label: c => `${c.label}: ${formatAUD(c.raw)}` } } } }
         });
       }
+      renderBillCharts();
     }
 
 
@@ -1289,14 +1500,15 @@
       const el = document.getElementById('billsList');
       if (!el) return;
       const bills = detectRecurringBills();
-      if (!bills.length) { el.innerHTML = '<div class="empty"><p>No recurring patterns yet. Need repeats across months.</p></div>'; return; }
-      el.innerHTML = bills.map(b => `<div class="list-item" style="flex-wrap:wrap">
+      if (!bills.length) el.innerHTML = '<div class="empty"><p>No recurring patterns yet. Need repeats across months.</p></div>';
+      else el.innerHTML = bills.map(b => `<div class="list-item" style="flex-wrap:wrap">
         <div class="list-item-main">
           <div class="list-item-title">${escapeHtml(b.name)}</div>
           <div class="list-item-sub">Avg ${formatAUD(b.avgAmount)} · last ${b.lastDate} · next ~${b.nextDate} · ${escapeHtml(getEntityName(b.entityId))} · ${b.count}x · ${escapeHtml(b.category)}</div>
         </div>
         <button type="button" class="btn btn-secondary btn-sm" onclick="pushBillToBudget('${escapeHtml(b.entityId)}','${escapeHtml(b.category)}',${b.avgAmount})">→ Budget</button>
       </div>`).join('');
+      renderBillCharts();
     }
     function pushBillToBudget(entityId, category, amount) {
       if (!entityId || !category || !(amount > 0)) return;
@@ -2088,6 +2300,7 @@
             budgets: (parsed.budgets && typeof parsed.budgets === 'object') ? parsed.budgets : {},
             accounts: Array.isArray(parsed.accounts) ? parsed.accounts : [],
             budgetTraining: Array.isArray(parsed.budgetTraining) ? parsed.budgetTraining : [],
+            valueHistory: Array.isArray(parsed.valueHistory) ? parsed.valueHistory : (data.valueHistory || []),
             categories: mergeCategories(parsed.categories),
             settings: {
               theme: (parsed.settings && parsed.settings.theme) || data.settings.theme || 'dark',
@@ -2135,7 +2348,7 @@
     }
     function clearAllData() {
       if (!confirm('Permanently delete all data?') || !confirm('Really sure?')) return;
-      data = { entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)), holdings: [], transactions: [], budgets: {}, accounts: [], budgetTraining: [], categories: [...DEFAULT_CATEGORIES], settings: { theme: data.settings.theme, currentEntity: 'all', onboardingDismissed: data.settings.onboardingDismissed, aiApiBase: data.settings.aiApiBase||'', aiApiKey: data.settings.aiApiKey||'', aiModel: data.settings.aiModel||'gpt-4o-mini' } };
+      data = { entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)), holdings: [], transactions: [], budgets: {}, accounts: [], budgetTraining: [], valueHistory: [], categories: [...DEFAULT_CATEGORIES], settings: { theme: data.settings.theme, currentEntity: 'all', onboardingDismissed: data.settings.onboardingDismissed, aiApiBase: data.settings.aiApiBase||'', aiApiKey: data.settings.aiApiKey||'', aiModel: data.settings.aiModel||'gpt-4o-mini' } };
       saveData(); populateEntitySelects(); renderAll(); alert('All data cleared.');
     }
     function calcDCA() {
