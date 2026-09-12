@@ -165,6 +165,31 @@
         </div>
       </div>
       <div class="card">
+        <div class="card-header">
+          <div class="card-title">Cash Flow</div>
+          <select id="cashflowPeriod" class="btn btn-secondary btn-sm" onchange="renderDashboard()" style="max-width:160px;padding:6px 8px;">
+            <option value="this">This month</option>
+            <option value="last">Last month</option>
+            <option value="fy">This FY (AU)</option>
+          </select>
+        </div>
+        <p class="text-sm text-muted mb-2" id="cashflowPeriodLabel"></p>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">Income</div><div class="metric-value positive" id="dashIncome">$0.00</div></div>
+          <div class="metric"><div class="metric-label">Expenses</div><div class="metric-value negative" id="dashExpenses">$0.00</div></div>
+          <div class="metric" style="grid-column:1/-1"><div class="metric-label" id="dashSurplusLabel">Surplus</div><div class="metric-value" id="dashSurplus">$0.00</div></div>
+        </div>
+        <label class="text-sm" style="display:flex;gap:8px;align-items:center;margin:12px 0 8px;">
+          <input type="checkbox" id="cashflowExcludeTransfers" checked onchange="renderDashboard()" /> Exclude transfers from surplus
+        </label>
+        <div class="flex gap-2 mb-2">
+          <button type="button" class="btn btn-secondary btn-sm" id="cfTabAll" onclick="setCashflowTab('all')">All</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="cfTabIncome" onclick="setCashflowTab('income')">Income</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="cfTabExpenses" onclick="setCashflowTab('expenses')">Expenses</button>
+        </div>
+        <div id="cashflowList" style="max-height:320px;overflow-y:auto;"></div>
+      </div>
+      <div class="card">
         <div class="card-header"><div class="card-title">Net Worth</div></div>
         <div class="metric-grid">
           <div class="metric"><div class="metric-label">Assets</div><div class="metric-value positive" id="dashAssets">$0.00</div></div>
@@ -230,6 +255,16 @@
         </div>
         <input type="file" id="receiptFile" class="hidden" accept="image/*,application/pdf,.pdf" />
         <div class="form-group" style="margin-bottom:12px;"><select id="spendMonthFilter" onchange="renderSpending()"></select></div>
+        <div class="metric-grid" style="margin-bottom:12px;">
+          <div class="metric"><div class="metric-label">Income</div><div class="metric-value positive" id="spendIncome">$0.00</div></div>
+          <div class="metric"><div class="metric-label">Expenses</div><div class="metric-value negative" id="spendExpenses">$0.00</div></div>
+          <div class="metric" style="grid-column:1/-1"><div class="metric-label" id="spendSurplusLabel">Surplus</div><div class="metric-value" id="spendSurplus">$0.00</div></div>
+        </div>
+        <div class="flex gap-2 mb-2">
+          <button type="button" class="btn btn-secondary btn-sm" id="spendTabAll" onclick="setSpendTab('all')">All</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="spendTabIncome" onclick="setSpendTab('income')">Income</button>
+          <button type="button" class="btn btn-secondary btn-sm" id="spendTabExpenses" onclick="setSpendTab('expenses')">Expenses</button>
+        </div>
         <div id="transactionsList"></div>
       </div>
       <div class="card">
@@ -651,6 +686,82 @@
       const assets = port.totalValue + cash;
       return { assets, cash, portfolioValue: port.totalValue, liabilities, netWorth: assets - liabilities, port };
     }
+
+    let cashflowTab = 'all';
+    let spendTab = 'all';
+
+    function setCashflowTab(tab) {
+      cashflowTab = tab || 'all';
+      renderDashboard();
+    }
+    function setSpendTab(tab) {
+      spendTab = tab || 'all';
+      renderSpending();
+    }
+
+    function isTransferTx(t) {
+      const cat = (t.category || '').toLowerCase();
+      const desc = (t.description || '').toLowerCase();
+      if (cat === 'transfer') return true;
+      return /\b(funds tfer|fund transfer|transfer from|transfer to|m-banking funds tfer|internet banking payment\b.*williams|payment to williams kayne|payment from kayne)\b/i.test(desc);
+    }
+
+    function auFyRange(d = new Date()) {
+      const y = d.getFullYear();
+      const m = d.getMonth(); // 0-based
+      // AU FY Jul 1 – Jun 30
+      if (m >= 6) return { start: `${y}-07-01`, end: `${y+1}-06-30`, label: `FY ${y}/${String(y+1).slice(2)}` };
+      return { start: `${y-1}-07-01`, end: `${y}-06-30`, label: `FY ${y-1}/${String(y).slice(2)}` };
+    }
+
+    function shiftMonthKey(monthKey, delta) {
+      const [y, m] = monthKey.split('-').map(Number);
+      const dt = new Date(y, m - 1 + delta, 1);
+      return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0');
+    }
+
+    function getCashflowPeriod() {
+      const sel = document.getElementById('cashflowPeriod');
+      const mode = (sel && sel.value) || 'this';
+      const nowKey = currentMonthKey();
+      if (mode === 'last') {
+        const key = shiftMonthKey(nowKey, -1);
+        const [y, mo] = key.split('-');
+        return { mode, start: key + '-01', end: key + '-31', monthKey: key, label: new Date(y, mo - 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' }) };
+      }
+      if (mode === 'fy') {
+        const fy = auFyRange();
+        return { mode, start: fy.start, end: fy.end, monthKey: null, label: fy.label };
+      }
+      const [y, mo] = nowKey.split('-');
+      return { mode, start: nowKey + '-01', end: nowKey + '-31', monthKey: nowKey, label: new Date(y, mo - 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' }) };
+    }
+
+    function txInPeriod(t, period) {
+      if (!t.date) return false;
+      if (period.monthKey) return t.date.startsWith(period.monthKey);
+      return t.date >= period.start && t.date <= period.end;
+    }
+
+    function calcCashflow(period, excludeTransfers) {
+      const f = data.settings.currentEntity;
+      const txs = data.transactions.filter(t => txInPeriod(t, period) && (f === 'all' || t.entityId === f));
+      let income = 0, expenses = 0;
+      const incomeTxs = [], expenseTxs = [];
+      txs.forEach(t => {
+        const skip = excludeTransfers && isTransferTx(t);
+        if (t.amount < 0) {
+          incomeTxs.push(t);
+          if (!skip) income += Math.abs(t.amount);
+        } else if (t.amount > 0) {
+          expenseTxs.push(t);
+          if (!skip) expenses += t.amount;
+        }
+      });
+      return { income, expenses, surplus: income - expenses, incomeTxs, expenseTxs, allTxs: txs };
+    }
+
+
     function getMonthSpend(monthKey) {
       const f = data.settings.currentEntity;
       return data.transactions.filter(t => t.date && t.date.startsWith(monthKey) && t.amount > 0 && (f==='all'||t.entityId===f)).reduce((s,t)=>s+t.amount,0);
@@ -835,6 +946,41 @@
       document.getElementById('dashEntityLabel').textContent = data.settings.currentEntity === 'all' ? '' : '· ' + getEntityName(data.settings.currentEntity);
       document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
 
+      // Cash flow panel
+      const period = getCashflowPeriod();
+      const excl = !!(document.getElementById('cashflowExcludeTransfers') || { checked: true }).checked;
+      const cf = calcCashflow(period, excl);
+      const pl = document.getElementById('cashflowPeriodLabel');
+      if (pl) pl.textContent = period.label + (excl ? ' · transfers excluded from surplus' : ' · all movements');
+      const incEl = document.getElementById('dashIncome');
+      const expEl = document.getElementById('dashExpenses');
+      const surEl = document.getElementById('dashSurplus');
+      const surLab = document.getElementById('dashSurplusLabel');
+      if (incEl) incEl.textContent = formatAUD(cf.income);
+      if (expEl) expEl.textContent = formatAUD(cf.expenses);
+      if (surEl) {
+        surEl.textContent = formatAUD(Math.abs(cf.surplus));
+        surEl.className = 'metric-value ' + (cf.surplus >= 0 ? 'positive' : 'negative');
+      }
+      if (surLab) surLab.textContent = cf.surplus >= 0 ? 'Surplus' : 'Shortfall';
+      ['cfTabAll','cfTabIncome','cfTabExpenses'].forEach(id => {
+        const b = document.getElementById(id);
+        if (!b) return;
+        const on = (id === 'cfTabAll' && cashflowTab === 'all') || (id === 'cfTabIncome' && cashflowTab === 'income') || (id === 'cfTabExpenses' && cashflowTab === 'expenses');
+        b.className = 'btn ' + (on ? 'btn-primary' : 'btn-secondary') + ' btn-sm';
+      });
+      const listEl = document.getElementById('cashflowList');
+      if (listEl) {
+        let rows = [];
+        if (cashflowTab === 'income') rows = [...cf.incomeTxs];
+        else if (cashflowTab === 'expenses') rows = [...cf.expenseTxs];
+        else rows = [...cf.allTxs];
+        rows.sort((a,b) => (b.date||'').localeCompare(a.date||''));
+        listEl.innerHTML = rows.length
+          ? rows.map(t => renderTxRow(t, true)).join('')
+          : '<div class="empty"><p>No movements in this period.</p></div>';
+      }
+
       const assetsEl = document.getElementById('dashAssets');
       const liabEl = document.getElementById('dashLiabilities');
       const nwEl = document.getElementById('dashNetWorth');
@@ -911,11 +1057,34 @@
       const currentVal = filter.value || currentMonthKey();
       filter.innerHTML = sorted.map(m => { const [y,mo]=m.split('-'); return `<option value="${m}" ${m===currentVal?'selected':''}>${new Date(y,mo-1).toLocaleString('en-AU',{month:'long',year:'numeric'})}</option>`; }).join('');
       const monthKey = filter.value;
-      const txs = filteredTransactions().filter(t => t.date && t.date.startsWith(monthKey)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+      const period = { mode: 'month', monthKey, start: monthKey + '-01', end: monthKey + '-31', label: monthKey };
+      const cf = calcCashflow(period, true);
+      const si = document.getElementById('spendIncome');
+      const se = document.getElementById('spendExpenses');
+      const ss = document.getElementById('spendSurplus');
+      const ssl = document.getElementById('spendSurplusLabel');
+      if (si) si.textContent = formatAUD(cf.income);
+      if (se) se.textContent = formatAUD(cf.expenses);
+      if (ss) {
+        ss.textContent = formatAUD(Math.abs(cf.surplus));
+        ss.className = 'metric-value ' + (cf.surplus >= 0 ? 'positive' : 'negative');
+      }
+      if (ssl) ssl.textContent = cf.surplus >= 0 ? 'Surplus' : 'Shortfall';
+      ['spendTabAll','spendTabIncome','spendTabExpenses'].forEach(id => {
+        const b = document.getElementById(id);
+        if (!b) return;
+        const on = (id === 'spendTabAll' && spendTab === 'all') || (id === 'spendTabIncome' && spendTab === 'income') || (id === 'spendTabExpenses' && spendTab === 'expenses');
+        b.className = 'btn ' + (on ? 'btn-primary' : 'btn-secondary') + ' btn-sm';
+      });
+      let txs = filteredTransactions().filter(t => t.date && t.date.startsWith(monthKey));
+      if (spendTab === 'income') txs = txs.filter(t => t.amount < 0);
+      else if (spendTab === 'expenses') txs = txs.filter(t => t.amount > 0);
+      txs.sort((a,b)=>(b.date||'').localeCompare(a.date||''));
       const list = document.getElementById('transactionsList');
       list.innerHTML = txs.length ? txs.map(t => renderTxRow(t,true)).join('') : '<div class="empty"><p>No transactions this month</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="document.getElementById(\'receiptFile\').click()">Scan receipt</button><button class="btn btn-secondary btn-sm" onclick="openTransactionModal()">Add transaction</button></div></div>';
 
       const byCat = {};
+
       txs.filter(t => t.amount > 0).forEach(t => { byCat[t.category] = (byCat[t.category]||0) + t.amount; });
       const labels = Object.keys(byCat), values = Object.values(byCat);
       const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#64748b','#f97316'];
