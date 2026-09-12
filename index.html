@@ -370,6 +370,21 @@
         <div class="form-group"><label>Description</label><input type="text" id="txDesc" placeholder="e.g. Coles, Fuel, Salary" required /></div>
         <div class="form-group"><label>Amount (AUD)</label><input type="number" id="txAmount" step="0.01" required /><p class="text-sm text-muted mt-1">Positive = expense, negative = income</p></div>
         <div class="form-group"><label>Category</label><select id="txCategory" required></select></div>
+        <div class="form-group">
+          <label>Receipt</label>
+          <div id="txReceiptPreviewWrap" class="hidden" style="margin-bottom:8px;">
+            <img id="txReceiptPreview" class="scan-preview" alt="Receipt" style="cursor:pointer" onclick="window.open(this.src,'_blank')" />
+            <button type="button" class="btn btn-secondary btn-sm mt-2" onclick="clearTxReceipt()">Remove receipt</button>
+          </div>
+          <div class="flex gap-2">
+            <button type="button" class="btn btn-secondary btn-block" onclick="document.getElementById('txReceiptCamera').click()">📷 Take photo</button>
+            <button type="button" class="btn btn-secondary btn-block" onclick="document.getElementById('txReceiptUpload').click()">Upload</button>
+          </div>
+          <input type="file" id="txReceiptCamera" class="hidden" accept="image/*" capture="environment" />
+          <input type="file" id="txReceiptUpload" class="hidden" accept="image/*,application/pdf,.pdf" />
+          <p class="text-sm text-muted mt-1">Saved on this transaction (on-device). Photo preferred; PDF stores without preview image.</p>
+          <div id="txReceiptStatus" class="status-msg text-muted"></div>
+        </div>
         <button type="submit" class="btn btn-primary btn-block">Save</button>
         <button type="button" class="btn btn-danger btn-block mt-2 hidden" id="deleteTxBtn" onclick="deleteTransaction()">Delete</button>
       </form>
@@ -1046,6 +1061,72 @@
       saveData(); closeModal('holdingModal'); renderAll();
     }
 
+    let pendingTxReceipt = null; // dataURL thumbnail or null
+    let pendingTxReceiptName = '';
+
+    function setTxReceiptPreview(dataUrl, note) {
+      const wrap = document.getElementById('txReceiptPreviewWrap');
+      const img = document.getElementById('txReceiptPreview');
+      const st = document.getElementById('txReceiptStatus');
+      if (dataUrl) {
+        pendingTxReceipt = dataUrl;
+        img.src = dataUrl;
+        wrap.classList.remove('hidden');
+        if (st) st.textContent = note || 'Receipt attached.';
+      } else {
+        pendingTxReceipt = null;
+        pendingTxReceiptName = '';
+        img.removeAttribute('src');
+        wrap.classList.add('hidden');
+        if (st) st.textContent = note || '';
+      }
+    }
+    function clearTxReceipt() {
+      setTxReceiptPreview(null, 'Receipt removed (save to confirm).');
+      const cam = document.getElementById('txReceiptCamera');
+      const up = document.getElementById('txReceiptUpload');
+      if (cam) cam.value = '';
+      if (up) up.value = '';
+    }
+    async function handleTxReceiptFile(file) {
+      const st = document.getElementById('txReceiptStatus');
+      if (!file) return;
+      if (st) st.textContent = 'Attaching…';
+      pendingTxReceiptName = file.name || 'receipt';
+      if (file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(file.name || '')) {
+        const thumb = await fileToDataURL(file, 960, 0.72);
+        if (!thumb) { if (st) st.textContent = 'Could not read image.'; return; }
+        setTxReceiptPreview(thumb, 'Photo ready — tap Save.');
+        return;
+      }
+      // PDF: store a small placeholder marker + name in notes field via data URL text stub
+      // Keep no image preview; embed minimal PDF as data URL only if small
+      if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) {
+        if (file.size > 1_200_000) {
+          if (st) st.textContent = 'PDF too large to store on-device here (max ~1.2MB). Take a photo instead.';
+          return;
+        }
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = '';
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+        }
+        const dataUrl = 'data:application/pdf;base64,' + btoa(binary);
+        pendingTxReceipt = dataUrl;
+        const wrap = document.getElementById('txReceiptPreviewWrap');
+        const img = document.getElementById('txReceiptPreview');
+        img.removeAttribute('src');
+        wrap.classList.remove('hidden');
+        img.alt = 'PDF receipt attached';
+        // show a simple PDF badge via replacing img display
+        if (st) st.textContent = 'PDF attached — tap Save. (No image preview.)';
+        return;
+      }
+      if (st) st.textContent = 'Use a photo or PDF.';
+    }
+
     function openTransactionModal(id = null) {
       document.getElementById('transactionForm').reset();
       document.getElementById('txId').value = '';
@@ -1055,6 +1136,9 @@
       populateEntitySelects();
       if (data.settings.currentEntity !== 'all') document.getElementById('txEntity').value = data.settings.currentEntity;
       document.getElementById('txCategory').innerHTML = data.categories.map(c => `<option value="${c}">${c}</option>`).join('');
+      clearTxReceipt();
+      const st = document.getElementById('txReceiptStatus');
+      if (st) st.textContent = '';
       if (id) {
         const t = data.transactions.find(x => x.id === id);
         if (t) {
@@ -1066,6 +1150,14 @@
           document.getElementById('txCategory').value = t.category || 'Other';
           document.getElementById('transactionModalTitle').textContent = 'Edit Transaction';
           document.getElementById('deleteTxBtn').classList.remove('hidden');
+          if (t.thumbnail && String(t.thumbnail).startsWith('data:image')) {
+            setTxReceiptPreview(t.thumbnail, 'Receipt on file.');
+          } else if (t.thumbnail && String(t.thumbnail).startsWith('data:application/pdf')) {
+            pendingTxReceipt = t.thumbnail;
+            document.getElementById('txReceiptPreviewWrap').classList.remove('hidden');
+            document.getElementById('txReceiptPreview').removeAttribute('src');
+            if (st) st.textContent = 'PDF receipt on file.';
+          }
         }
       }
       document.getElementById('transactionModal').classList.add('open');
@@ -1074,7 +1166,6 @@
     function saveTransaction(e) {
       e.preventDefault();
       const id = document.getElementById('txId').value;
-      const prev = id ? data.transactions.find(t => t.id === id) : null;
       const tx = {
         id: id || uid(),
         entityId: document.getElementById('txEntity').value,
@@ -1083,9 +1174,10 @@
         amount: parseFloat(document.getElementById('txAmount').value) || 0,
         category: document.getElementById('txCategory').value
       };
-      if (prev && prev.thumbnail) tx.thumbnail = prev.thumbnail;
+      if (pendingTxReceipt) tx.thumbnail = pendingTxReceipt;
       if (id) { const idx = data.transactions.findIndex(t => t.id === id); if (idx >= 0) data.transactions[idx] = tx; }
       else data.transactions.push(tx);
+      pendingTxReceipt = null;
       saveData(); closeModal('transactionModal'); renderAll();
     }
     function deleteTransaction() {
@@ -1295,7 +1387,12 @@
     let pendingReceiptThumb = null;
 
     function renderTxRow(t, clickable) {
-      const thumb = t.thumbnail ? `<img class="receipt-thumb" src="${t.thumbnail}" alt="" />` : '';
+      let thumb = '';
+      if (t.thumbnail && String(t.thumbnail).startsWith('data:image')) {
+        thumb = `<img class="receipt-thumb" src="${t.thumbnail}" alt="" />`;
+      } else if (t.thumbnail) {
+        thumb = `<span class="receipt-thumb" style="display:inline-flex;align-items:center;justify-content:center;font-size:11px;background:var(--card);">PDF</span>`;
+      }
       const click = clickable ? ` style="cursor:pointer" onclick="editTransaction('${t.id}')"` : '';
       return `<div class="list-item"${click}><div class="list-item-main"><div class="list-item-title">${thumb}${escapeHtml(t.description)}</div><div class="list-item-sub">${t.date} · ${t.category} · ${getEntityName(t.entityId)}</div></div><div class="list-item-value ${t.amount>0?'negative':'positive'}">${t.amount>0?'-':'+'}${formatAUD(Math.abs(t.amount))}</div></div>`;
     }
@@ -1590,6 +1687,22 @@
     document.querySelectorAll('.modal-overlay').forEach(overlay => {
       overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
     });
+
+    
+    function wireTxReceiptInputs() {
+      ['txReceiptCamera', 'txReceiptUpload'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || el.dataset.wired) return;
+        el.dataset.wired = '1';
+        el.addEventListener('change', () => {
+          if (el.files && el.files[0]) {
+            handleTxReceiptFile(el.files[0]);
+            el.value = '';
+          }
+        });
+      });
+    }
+    wireTxReceiptInputs();
 
     loadData();
     renderAll();
