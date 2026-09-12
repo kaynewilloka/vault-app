@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#0f1419" />
+  <title>Vault — Multi-Entity Portfolio & Budget</title>
+  <!-- Chart.js vendor (local). Fallback CDN: https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js -->
+  <script src="vendor/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419; --bg-elevated: #1a2332; --bg-card: #1e293b; --border: #2d3a4f;
+      --text: #e2e8f0; --text-muted: #94a3b8; --accent: #3b82f6; --accent-hover: #2563eb;
+      --positive: #22c55e; --negative: #ef4444; --warning: #f59e0b; --radius: 10px;
+      --shadow: 0 4px 12px rgba(0,0,0,0.35);
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+    [data-theme="light"] {
+      --bg: #f1f5f9; --bg-elevated: #fff; --bg-card: #fff; --border: #e2e8f0;
+      --text: #0f172a; --text-muted: #64748b; --accent: #2563eb; --accent-hover: #1d4ed8;
+      --shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { font-size: 16px; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.5; min-height: 100vh; padding-bottom: 80px; -webkit-font-smoothing: antialiased; }
+    header { background: var(--bg-elevated); border-bottom: 1px solid var(--border); padding: 12px 16px; position: sticky; top: 0; z-index: 100; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .logo { font-weight: 700; font-size: 1.2rem; letter-spacing: -0.02em; white-space: nowrap; }
+    .logo span { color: var(--accent); }
+    .header-actions { display: flex; gap: 8px; align-items: center; flex: 1; justify-content: flex-end; }
+    .entity-select { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 8px; font-size: 0.85rem; max-width: 140px; }
+    .icon-btn { background: transparent; border: 1px solid var(--border); color: var(--text); width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 1.1rem; }
+    .icon-btn:hover { background: var(--bg-card); }
+    nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--bg-elevated); border-top: 1px solid var(--border); display: flex; justify-content: space-around; padding: 8px 0 calc(8px + env(safe-area-inset-bottom)); z-index: 100; }
+    .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: none; color: var(--text-muted); font-size: 0.7rem; cursor: pointer; padding: 6px 4px; }
+    .nav-item.active { color: var(--accent); }
+    .nav-item svg { width: 22px; height: 22px; }
+    main { max-width: 720px; margin: 0 auto; padding: 16px; }
+    .section { display: none; }
+    .section.active { display: block; animation: fadeIn 0.2s ease; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; box-shadow: var(--shadow); }
+    .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; flex-wrap: wrap; }
+    .card-title { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+    .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .metric { background: var(--bg-elevated); border-radius: 8px; padding: 12px; }
+    .metric-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 4px; }
+    .metric-value { font-size: 1.2rem; font-weight: 700; letter-spacing: -0.02em; }
+    .metric-value.positive { color: var(--positive); }
+    .metric-value.negative { color: var(--negative); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 16px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; border: none; cursor: pointer; transition: background 0.15s, transform 0.1s; }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .btn-secondary:hover { background: var(--bg-elevated); }
+    .btn-danger { background: var(--negative); color: white; }
+    .btn-sm { padding: 6px 12px; font-size: 0.8rem; }
+    .btn-block { width: 100%; }
+    .form-group { margin-bottom: 14px; }
+    label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text-muted); margin-bottom: 6px; }
+    input, select, textarea { width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 1rem; font-family: inherit; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59,130,246,0.2); }
+    textarea { resize: vertical; min-height: 70px; }
+    .list-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--border); gap: 8px; }
+    .list-item:last-child { border-bottom: none; }
+    .list-item-main { flex: 1; min-width: 0; }
+    .list-item-title { font-weight: 600; font-size: 0.95rem; }
+    .list-item-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+    .list-item-value { text-align: right; font-weight: 600; white-space: nowrap; }
+    .progress-wrap { margin-top: 8px; }
+    .progress-bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+    .progress-fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+    .progress-fill.good { background: var(--positive); }
+    .progress-fill.warn { background: var(--warning); }
+    .progress-fill.over { background: var(--negative); }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: flex-end; justify-content: center; z-index: 200; padding: 16px; }
+    .modal-overlay.open { display: flex; }
+    .modal { background: var(--bg-elevated); border-radius: 16px 16px 0 0; width: 100%; max-width: 500px; max-height: 90vh; overflow-y: auto; padding: 20px; animation: slideUp 0.25s ease; }
+    @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+    .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .modal-title { font-size: 1.15rem; font-weight: 700; }
+    .close-btn { background: none; border: none; color: var(--text-muted); font-size: 1.5rem; cursor: pointer; line-height: 1; }
+    .chart-container { position: relative; height: 220px; margin: 12px 0; }
+    .empty { text-align: center; padding: 28px 16px; color: var(--text-muted); }
+    .empty p { margin-top: 8px; font-size: 0.9rem; }
+    .text-muted { color: var(--text-muted); }
+    .text-sm { font-size: 0.85rem; }
+    .mt-2 { margin-top: 8px; }
+    .mt-3 { margin-top: 12px; }
+    .mb-2 { margin-bottom: 8px; }
+    .flex { display: flex; }
+    .gap-2 { gap: 8px; }
+    .justify-between { justify-content: space-between; }
+    .items-center { align-items: center; }
+    .w-full { width: 100%; }
+    .hidden { display: none !important; }
+    .disclaimer { font-size: 0.75rem; color: var(--text-muted); text-align: center; padding: 16px; border-top: 1px solid var(--border); margin-top: 24px; }
+    .drop-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 24px; text-align: center; color: var(--text-muted); cursor: pointer; }
+    .drop-zone:hover, .drop-zone.dragover { border-color: var(--accent); background: rgba(59,130,246,0.05); }
+    .badge { display: inline-block; font-size: 0.65rem; padding: 2px 7px; border-radius: 999px; font-weight: 600; text-transform: uppercase; margin-left: 4px; }
+    .badge-stock { background: rgba(59,130,246,0.15); color: var(--accent); }
+    .badge-crypto { background: rgba(245,158,11,0.15); color: var(--warning); }
+    .badge-entity { background: rgba(148,163,184,0.15); color: var(--text-muted); }
+    .insight { background: var(--bg-elevated); border-left: 3px solid var(--accent); padding: 10px 12px; margin-bottom: 8px; border-radius: 0 8px 8px 0; font-size: 0.9rem; }
+    .insight.warn { border-left-color: var(--warning); }
+    .insight.risk { border-left-color: var(--negative); }
+    .insight.good { border-left-color: var(--positive); }
+    .status-msg { font-size: 0.8rem; margin-top: 6px; }
+
+    .onboarding { background: linear-gradient(135deg, rgba(59,130,246,0.15), rgba(34,197,94,0.1)); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 12px; position: relative; }
+    .onboarding h3 { font-size: 0.95rem; margin-bottom: 6px; }
+    .onboarding p { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 10px; }
+    .onboarding .dismiss { position: absolute; top: 8px; right: 10px; background: none; border: none; color: var(--text-muted); font-size: 1.2rem; cursor: pointer; }
+    .empty-cta { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+    .scan-preview { max-width: 100%; max-height: 160px; border-radius: 8px; margin: 8px 0; border: 1px solid var(--border); object-fit: contain; background: var(--bg); }
+    .scan-status { font-size: 0.8rem; color: var(--text-muted); margin: 8px 0; min-height: 1.2em; }
+    .toggle-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .toggle-row button { flex: 1; }
+    .toggle-row button.active { background: var(--accent); color: white; border-color: var(--accent); }
+    .receipt-thumb { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; border: 1px solid var(--border); margin-right: 8px; vertical-align: middle; }
+    .ai-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 999px; background: rgba(59,130,246,0.2); color: var(--accent); margin-left: 6px; }
+  </style>
+</head>
+<body data-theme="dark">
+  <header>
+    <div class="logo">Vault <span>·</span></div>
+    <div class="header-actions">
+      <select id="entityFilter" class="entity-select" onchange="onEntityFilterChange()"></select>
+      <button class="icon-btn" id="themeToggle" title="Toggle theme">◐</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="onboardingTip" class="onboarding hidden">
+      <button class="dismiss" onclick="dismissOnboarding()" title="Dismiss">×</button>
+      <h3>Welcome to Vault</h3>
+      <p>Track spending and investments across entities (Personal, Business, Trust, and more). Use <strong>Scan Receipt</strong> on Spend to file expenses quickly — confirm before anything is saved.</p>
+      <div class="flex gap-2">
+        <button class="btn btn-primary btn-sm" onclick="showSection('spending'); document.getElementById('receiptFile').click();">Try Scan</button>
+        <button class="btn btn-secondary btn-sm" onclick="dismissOnboarding()">Got it</button>
+      </div>
+    </div>
+    <section id="dashboard" class="section active">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Overview <span id="dashEntityLabel" class="text-muted"></span></div>
+          <span class="text-sm text-muted" id="lastUpdated"></span>
+        </div>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">Portfolio Value</div><div class="metric-value" id="dashPortfolioValue">$0.00</div></div>
+          <div class="metric"><div class="metric-label">Unrealised P/L</div><div class="metric-value" id="dashPnL">$0.00</div></div>
+          <div class="metric"><div class="metric-label">This Month Spend</div><div class="metric-value" id="dashSpend">$0.00</div></div>
+          <div class="metric"><div class="metric-label">Budget Remaining</div><div class="metric-value" id="dashBudgetLeft">$0.00</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Insights</div></div>
+        <div id="insightsList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Portfolio Allocation</div></div>
+        <div class="chart-container" id="allocationContainer"><canvas id="allocationChart"></canvas></div>
+        <div id="allocationLegend" class="text-sm"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Recent Activity</div></div>
+        <div id="recentActivity"></div>
+      </div>
+    </section>
+
+    <section id="portfolio" class="section">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Holdings</div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" onclick="refreshCryptoPrices()">↻ Crypto</button>
+            <button class="btn btn-primary btn-sm" onclick="openHoldingModal()">+ Add</button>
+          </div>
+        </div>
+        <div id="priceStatus" class="status-msg text-muted"></div>
+        <div id="holdingsList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Performance</div></div>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">Total Cost</div><div class="metric-value" id="portTotalCost">$0.00</div></div>
+          <div class="metric"><div class="metric-label">Market Value</div><div class="metric-value" id="portMarketValue">$0.00</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="spending" class="section">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Transactions</div>
+          <div class="flex gap-2">
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('receiptFile').click()">📷 Scan</button>
+            <button class="btn btn-primary btn-sm" onclick="openTransactionModal()">+ Add</button>
+          </div>
+        </div>
+        <input type="file" id="receiptFile" class="hidden" accept="image/*,application/pdf,.pdf" />
+        <div class="form-group" style="margin-bottom:12px;"><select id="spendMonthFilter" onchange="renderSpending()"></select></div>
+        <div id="transactionsList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Spending by Category</div></div>
+        <div class="chart-container"><canvas id="spendChart"></canvas></div>
+      </div>
+    </section>
+
+    <section id="budgets" class="section">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Monthly Budgets</div>
+          <button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Edit</button>
+        </div>
+        <div id="budgetsList"></div>
+      </div>
+    </section>
+
+    <section id="import" class="section">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Entities</div>
+          <button class="btn btn-primary btn-sm" onclick="openEntityModal()">Manage</button>
+        </div>
+        <div id="entitiesList"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Import CSV</div></div>
+        <p class="text-sm text-muted mb-2">Import bank or broker CSVs. Assign to an entity on import.</p>
+        <div class="drop-zone" id="dropZone"><p>Tap or drop CSV file here</p><input type="file" id="csvFile" accept=".csv,text/csv" class="hidden" /></div>
+        <div id="importPreview" class="mt-3 hidden"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Export Data</div></div>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-block" onclick="exportJSON()">Export JSON</button>
+          <button class="btn btn-secondary btn-block" onclick="exportCSV()">Export CSV</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Tools</div></div>
+        <div class="form-group">
+          <label>Dollar-Cost Averaging Calculator</label>
+          <div class="flex gap-2">
+            <input type="number" id="dcaAmount" placeholder="Amount per buy ($)" step="0.01" />
+            <input type="number" id="dcaFreq" placeholder="Buys per year" value="12" />
+          </div>
+          <div class="flex gap-2 mt-2">
+            <input type="number" id="dcaYears" placeholder="Years" value="5" step="0.5" />
+            <input type="number" id="dcaReturn" placeholder="Expected annual %" value="8" step="0.1" />
+          </div>
+          <button class="btn btn-primary btn-block mt-2" onclick="calcDCA()">Calculate</button>
+          <div id="dcaResult" class="mt-2 text-sm"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Scan Receipt <span class="ai-badge">AI Helper</span></div></div>
+        <p class="text-sm text-muted mb-2">Upload a receipt image or PDF. Heuristics suggest category and entity; optional vision API fills merchant/date/amount when configured. Always confirm before save.</p>
+        <button class="btn btn-primary btn-block" onclick="document.getElementById('receiptFile').click()">Upload Receipt</button>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">AI Settings (Optional)</div></div>
+        <p class="text-sm text-muted mb-2">OpenAI-compatible vision endpoint. Key stays in this browser only. Leave blank to use heuristics + manual entry.</p>
+        <div class="form-group"><label>API Base URL</label><input type="url" id="aiApiBase" placeholder="https://api.openai.com/v1" /></div>
+        <div class="form-group"><label>API Key</label><input type="password" id="aiApiKey" placeholder="sk-…" autocomplete="off" /></div>
+        <div class="form-group"><label>Model</label><input type="text" id="aiModel" placeholder="gpt-4o-mini" /></div>
+        <button class="btn btn-secondary btn-block" onclick="saveAiSettings()">Save AI Settings</button>
+        <p id="aiSettingsStatus" class="status-msg text-muted"></p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Danger Zone</div></div>
+        <button class="btn btn-danger btn-block" onclick="clearAllData()">Clear All Data</button>
+      </div>
+    </section>
+  </main>
+
+  <div class="disclaimer">
+    Vault is a personal tracking tool only. It does not provide financial, investment or tax advice.
+    Past performance is not indicative of future results. Always do your own research.
+  </div>
+
+  <nav>
+    <button class="nav-item active" data-section="dashboard" onclick="showSection('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Home
+    </button>
+    <button class="nav-item" data-section="portfolio" onclick="showSection('portfolio')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>Portfolio
+    </button>
+    <button class="nav-item" data-section="spending" onclick="showSection('spending')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>Spend
+    </button>
+    <button class="nav-item" data-section="budgets" onclick="showSection('budgets')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg>Budgets
+    </button>
+    <button class="nav-item" data-section="import" onclick="showSection('import')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>More
+    </button>
+  </nav>
+
+  <!-- Receipt Review Modal -->
+  <div class="modal-overlay" id="receiptModal">
+    <div class="modal">
+      <div class="modal-header"><div class="modal-title">Review Receipt</div><button class="close-btn" onclick="closeModal('receiptModal')">×</button></div>
+      <p class="text-sm text-muted mb-2">Confirm details before filing as a transaction. Nothing is saved until you confirm.</p>
+      <div id="receiptPreviewWrap" class="hidden"><img id="receiptPreview" class="scan-preview" alt="Receipt preview" /></div>
+      <div id="receiptScanStatus" class="scan-status"></div>
+      <form id="receiptForm" onsubmit="confirmReceiptSave(event)">
+        <div class="form-group"><label>Description / Merchant</label><input type="text" id="rcptDesc" required placeholder="e.g. Ampol, Bunnings" /></div>
+        <div class="form-group"><label>Date</label><input type="date" id="rcptDate" required /></div>
+        <div class="form-group"><label>Amount (AUD expense)</label><input type="number" id="rcptAmount" step="0.01" min="0" required /></div>
+        <div class="form-group"><label>Category</label><select id="rcptCategory" required></select></div>
+        <div class="form-group"><label>Entity</label><select id="rcptEntity" required></select></div>
+        <div class="form-group">
+          <label>Quick entity</label>
+          <div class="toggle-row">
+            <button type="button" class="btn btn-secondary btn-sm" id="rcptEntPersonal" onclick="setReceiptEntityQuick('personal')">Personal</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="rcptEntBusiness" onclick="setReceiptEntityQuick('business')">Business</button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary btn-block">Confirm &amp; Save</button>
+        <button type="button" class="btn btn-secondary btn-block mt-2" onclick="closeModal('receiptModal')">Cancel</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Holding Modal -->
+  <div class="modal-overlay" id="holdingModal">
+    <div class="modal">
+      <div class="modal-header"><div class="modal-title" id="holdingModalTitle">Add Holding</div><button class="close-btn" onclick="closeModal('holdingModal')">×</button></div>
+      <form id="holdingForm" onsubmit="saveHolding(event)">
+        <input type="hidden" id="holdingId" />
+        <div class="form-group"><label>Entity</label><select id="holdingEntity" required></select></div>
+        <div class="form-group"><label>Type</label><select id="holdingType" required><option value="stock">Stock / ETF</option><option value="crypto">Crypto</option></select></div>
+        <div class="form-group"><label>Symbol / Ticker</label><input type="text" id="holdingSymbol" placeholder="e.g. VAS, BTC, AAPL" required /></div>
+        <div class="form-group"><label>Name (optional)</label><input type="text" id="holdingName" placeholder="e.g. Vanguard Australian Shares" /></div>
+        <div class="form-group"><label>Quantity</label><input type="number" id="holdingQty" step="any" min="0" required /></div>
+        <div class="form-group"><label>Average Cost (AUD per unit)</label><input type="number" id="holdingCost" step="0.0001" min="0" required /></div>
+        <div class="form-group"><label>Current Price (AUD)</label><input type="number" id="holdingPrice" step="0.0001" min="0" required /></div>
+        <div class="form-group"><label>Notes</label><textarea id="holdingNotes" placeholder="Investment thesis, reasons..."></textarea></div>
+        <button type="submit" class="btn btn-primary btn-block">Save Holding</button>
+        <button type="button" class="btn btn-danger btn-block mt-2 hidden" id="deleteHoldingBtn" onclick="deleteHolding()">Delete</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Transaction Modal -->
+  <div class="modal-overlay" id="transactionModal">
+    <div class="modal">
+      <div class="modal-header"><div class="modal-title" id="transactionModalTitle">Add Transaction</div><button class="close-btn" onclick="closeModal('transactionModal')">×</button></div>
+      <form id="transactionForm" onsubmit="saveTransaction(event)">
+        <input type="hidden" id="txId" />
+        <div class="form-group"><label>Entity</label><select id="txEntity" required></select></div>
+        <div class="form-group"><label>Date</label><input type="date" id="txDate" required /></div>
+        <div class="form-group"><label>Description</label><input type="text" id="txDesc" placeholder="e.g. Coles, Fuel, Salary" required /></div>
+        <div class="form-group"><label>Amount (AUD)</label><input type="number" id="txAmount" step="0.01" required /><p class="text-sm text-muted mt-1">Positive = expense, negative = income</p></div>
+        <div class="form-group"><label>Category</label><select id="txCategory" required></select></div>
+        <button type="submit" class="btn btn-primary btn-block">Save</button>
+        <button type="button" class="btn btn-danger btn-block mt-2 hidden" id="deleteTxBtn" onclick="deleteTransaction()">Delete</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Budget Modal -->
+  <div class="modal-overlay" id="budgetModal">
+    <div class="modal">
+      <div class="modal-header"><div class="modal-title">Edit Monthly Budgets</div><button class="close-btn" onclick="closeModal('budgetModal')">×</button></div>
+      <form id="budgetForm" onsubmit="saveBudgets(event)">
+        <div class="form-group"><label>Entity for these budgets</label><select id="budgetEntity"></select></div>
+        <div id="budgetInputs"></div>
+        <button type="submit" class="btn btn-primary btn-block">Save Budgets</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Entity Modal -->
+  <div class="modal-overlay" id="entityModal">
+    <div class="modal">
+      <div class="modal-header"><div class="modal-title">Manage Entities</div><button class="close-btn" onclick="closeModal('entityModal')">×</button></div>
+      <div id="entityManageList"></div>
+      <hr style="border-color:var(--border); margin:16px 0;" />
+      <form id="entityForm" onsubmit="saveEntity(event)">
+        <input type="hidden" id="entityId" />
+        <div class="form-group"><label>Name</label><input type="text" id="entityName" placeholder="e.g. Business, Family Trust" required /></div>
+        <div class="form-group"><label>Type</label><select id="entityType"><option value="personal">Personal</option><option value="company">Company</option><option value="trust">Trust</option><option value="other">Other</option></select></div>
+        <button type="submit" class="btn btn-primary btn-block">Add / Update Entity</button>
+        <button type="button" class="btn btn-secondary btn-block mt-2" onclick="resetEntityForm()">Clear Form</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const DEFAULT_CATEGORIES = ['Housing','Food','Transport','Fuel','Utilities','Entertainment','Subscriptions','Health','Investing','Personal','Tools','Materials','Subcontractors','Income','Other'];
+    const DEFAULT_ENTITIES = [
+      { id: 'personal', name: 'Personal', type: 'personal' },
+      { id: 'business', name: 'Business', type: 'company' },
+      { id: 'company2', name: 'Company 2', type: 'company' },
+      { id: 'investments', name: 'Investments', type: 'company' },
+      { id: 'trust', name: 'Trust', type: 'trust' }
+    ];
+    const CRYPTO_MAP = {
+      'BTC':'bitcoin','ETH':'ethereum','SOL':'solana','ADA':'cardano','XRP':'ripple','DOT':'polkadot',
+      'DOGE':'dogecoin','AVAX':'avalanche-2','LINK':'chainlink','MATIC':'matic-network','UNI':'uniswap',
+      'ATOM':'cosmos','LTC':'litecoin','BCH':'bitcoin-cash','XLM':'stellar','ALGO':'algorand',
+      'VET':'vechain','FIL':'filecoin','AAVE':'aave','MKR':'maker','SHIB':'shiba-inu','NEAR':'near',
+      'FTM':'fantom','SAND':'the-sandbox','MANA':'decentraland','AXS':'axie-infinity','CRO':'crypto-com-chain',
+      'USDT':'tether','USDC':'usd-coin','BNB':'binancecoin'
+    };
+
+    let data = {
+      entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)),
+      holdings: [], transactions: [], budgets: {},
+      categories: [...DEFAULT_CATEGORIES],
+      settings: { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini' }
+    };
+    let allocationChart = null, spendChart = null;
+
+    function mergeCategories(existing) {
+      const set = [];
+      (existing || []).concat(DEFAULT_CATEGORIES).forEach(c => { if (c && !set.includes(c)) set.push(c); });
+      return set.length ? set : [...DEFAULT_CATEGORIES];
+    }
+    function loadData() {
+      try {
+        const raw = localStorage.getItem('vaultAppData');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          data = { ...data, ...parsed };
+          data.settings = { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini', ...(parsed.settings || {}) };
+          if (!data.entities || !data.entities.length) data.entities = JSON.parse(JSON.stringify(DEFAULT_ENTITIES));
+          data.categories = mergeCategories(data.categories);
+          data.holdings.forEach(h => { if (!h.entityId) h.entityId = 'personal'; });
+          data.transactions.forEach(t => { if (!t.entityId) t.entityId = 'personal'; });
+        }
+      } catch (e) { console.warn(e); }
+      applyTheme();
+      populateEntitySelects();
+      populateAiSettingsForm();
+      updateOnboarding();
+    }
+    function saveData() { localStorage.setItem('vaultAppData', JSON.stringify(data)); }
+    function applyTheme() { document.body.setAttribute('data-theme', data.settings.theme || 'dark'); }
+    document.getElementById('themeToggle').addEventListener('click', () => {
+      data.settings.theme = data.settings.theme === 'dark' ? 'light' : 'dark';
+      applyTheme(); saveData();
+    });
+
+    function getEntityName(id) { const e = data.entities.find(x => x.id === id); return e ? e.name : 'Unknown'; }
+    function populateEntitySelects() {
+      const filter = document.getElementById('entityFilter');
+      const current = data.settings.currentEntity || 'all';
+      filter.innerHTML = `<option value="all">All Entities</option>` + data.entities.map(e => `<option value="${e.id}" ${e.id===current?'selected':''}>${escapeHtml(e.name)}</option>`).join('');
+      ['holdingEntity','txEntity','budgetEntity','rcptEntity'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = data.entities.map(e => `<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('');
+      });
+    }
+    function onEntityFilterChange() {
+      data.settings.currentEntity = document.getElementById('entityFilter').value;
+      saveData(); renderAll();
+    }
+    function filteredHoldings() {
+      const f = data.settings.currentEntity;
+      return f === 'all' ? data.holdings : data.holdings.filter(h => h.entityId === f);
+    }
+    function filteredTransactions() {
+      const f = data.settings.currentEntity;
+      return f === 'all' ? data.transactions : data.transactions.filter(t => t.entityId === f);
+    }
+
+    function showSection(id) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.section === id));
+      renderAll();
+    }
+    function renderAll() { renderDashboard(); renderPortfolio(); renderSpending(); renderBudgets(); renderEntitiesList(); }
+
+    function formatAUD(n) {
+      if (n == null || isNaN(n)) return '$0.00';
+      return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', minimumFractionDigits: 2 }).format(n);
+    }
+    function formatPct(n) { if (isNaN(n)) return '0.0%'; return (n > 0 ? '+' : '') + n.toFixed(1) + '%'; }
+    function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+    function today() { return new Date().toISOString().slice(0, 10); }
+    function currentMonthKey() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'); }
+    function escapeHtml(str) { if (!str) return ''; return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+    function calcPortfolio(holdings = null) {
+      const list = holdings || filteredHoldings();
+      let totalCost = 0, totalValue = 0;
+      list.forEach(h => { totalCost += (h.quantity||0)*(h.avgCost||0); totalValue += (h.quantity||0)*(h.currentPrice||0); });
+      return { totalCost, totalValue, pnl: totalValue - totalCost, pnlPct: totalCost > 0 ? ((totalValue-totalCost)/totalCost)*100 : 0 };
+    }
+    function getMonthSpend(monthKey) {
+      const f = data.settings.currentEntity;
+      return data.transactions.filter(t => t.date && t.date.startsWith(monthKey) && t.amount > 0 && (f==='all'||t.entityId===f)).reduce((s,t)=>s+t.amount,0);
+    }
+    function getBudgetTotal() {
+      const f = data.settings.currentEntity;
+      let total = 0;
+      Object.keys(data.budgets).forEach(key => {
+        const [ent] = key.split('|');
+        if (f === 'all' || ent === f) total += Number(data.budgets[key]) || 0;
+      });
+      return total;
+    }
+
+    async function refreshCryptoPrices() {
+      const status = document.getElementById('priceStatus');
+      const cryptos = data.holdings.filter(h => h.type === 'crypto');
+      if (!cryptos.length) { status.textContent = 'No crypto holdings to update.'; return; }
+      const ids = [], symbolToId = {};
+      cryptos.forEach(h => {
+        const sym = (h.symbol||'').toUpperCase();
+        const cgId = CRYPTO_MAP[sym];
+        if (cgId && !ids.includes(cgId)) { ids.push(cgId); symbolToId[sym] = cgId; }
+      });
+      if (!ids.length) { status.textContent = 'No recognised crypto symbols (try BTC, ETH, SOL…).'; return; }
+      status.textContent = 'Fetching prices…';
+      try {
+        const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids.join(',')}&vs_currencies=aud`);
+        if (!res.ok) throw new Error('Network error');
+        const prices = await res.json();
+        let updated = 0;
+        data.holdings.forEach(h => {
+          if (h.type !== 'crypto') return;
+          const sym = (h.symbol||'').toUpperCase();
+          const cgId = CRYPTO_MAP[sym];
+          if (cgId && prices[cgId]?.aud) { h.currentPrice = prices[cgId].aud; h.updatedAt = new Date().toISOString(); updated++; }
+        });
+        saveData();
+        status.textContent = `Updated ${updated} crypto price(s) in AUD.`;
+        renderPortfolio(); renderDashboard();
+      } catch (err) {
+        status.textContent = 'Price fetch failed. Check connection or try again later.';
+        console.error(err);
+      }
+    }
+
+    function generateInsights() {
+      const insights = [];
+      const holdings = filteredHoldings();
+      const port = calcPortfolio(holdings);
+      const entityLabel = data.settings.currentEntity === 'all' ? 'All entities' : getEntityName(data.settings.currentEntity);
+      if (!holdings.length) { insights.push({ type: '', text: 'Add holdings to see portfolio insights.' }); return insights; }
+
+      const values = holdings.map(h => ({ symbol: h.symbol, value: (h.quantity||0)*(h.currentPrice||0) })).filter(x => x.value > 0);
+      const total = values.reduce((s,v) => s+v.value, 0);
+      if (total > 0) {
+        values.sort((a,b) => b.value - a.value);
+        const top = values[0];
+        const topPct = (top.value / total) * 100;
+        if (topPct >= 40) insights.push({ type: 'risk', text: `${top.symbol} is ${topPct.toFixed(0)}% of ${entityLabel} portfolio — high concentration risk.` });
+        else if (topPct >= 25) insights.push({ type: 'warn', text: `${top.symbol} is ${topPct.toFixed(0)}% of the portfolio. Consider diversification.` });
+
+        const cryptoVal = holdings.filter(h => h.type==='crypto').reduce((s,h)=>s+(h.quantity||0)*(h.currentPrice||0),0);
+        const cryptoPct = (cryptoVal / total) * 100;
+        if (cryptoPct >= 50) insights.push({ type: 'warn', text: `Crypto is ${cryptoPct.toFixed(0)}% of this view. High volatility exposure.` });
+      }
+      if (port.totalCost > 0) {
+        insights.push({ type: port.pnl >= 0 ? 'good' : 'risk', text: `${entityLabel} unrealised P/L: ${formatAUD(port.pnl)} (${formatPct(port.pnlPct)}) on ${formatAUD(port.totalCost)} cost base.` });
+      }
+      if (data.settings.currentEntity === 'all' && data.entities.length > 1) {
+        const byEntity = {};
+        data.holdings.forEach(h => { const v = (h.quantity||0)*(h.currentPrice||0); byEntity[h.entityId] = (byEntity[h.entityId]||0) + v; });
+        const parts = Object.entries(byEntity).filter(([,v])=>v>0).map(([id,v]) => `${getEntityName(id)} ${formatAUD(v)}`);
+        if (parts.length > 1) insights.push({ type: '', text: 'Value by entity: ' + parts.join(' · ') });
+      }
+      const monthKey = currentMonthKey();
+      const spend = getMonthSpend(monthKey);
+      const budget = getBudgetTotal();
+      if (budget > 0) {
+        const used = (spend / budget) * 100;
+        if (used >= 90) insights.push({ type: 'risk', text: `You've used ${used.toFixed(0)}% of this month's budget.` });
+        else if (used >= 70) insights.push({ type: 'warn', text: `${used.toFixed(0)}% of monthly budget used so far.` });
+      }
+      if (!insights.length) insights.push({ type: 'good', text: 'Portfolio looks balanced. No major flags right now.' });
+      return insights;
+    }
+
+    function renderDashboard() {
+      const port = calcPortfolio();
+      const monthKey = currentMonthKey();
+      const spend = getMonthSpend(monthKey);
+      const budgetTotal = getBudgetTotal();
+      const remaining = budgetTotal - spend;
+      document.getElementById('dashPortfolioValue').textContent = formatAUD(port.totalValue);
+      const pnlEl = document.getElementById('dashPnL');
+      pnlEl.textContent = formatAUD(port.pnl) + ' (' + formatPct(port.pnlPct) + ')';
+      pnlEl.className = 'metric-value ' + (port.pnl >= 0 ? 'positive' : 'negative');
+      document.getElementById('dashSpend').textContent = formatAUD(spend);
+      const leftEl = document.getElementById('dashBudgetLeft');
+      leftEl.textContent = formatAUD(remaining);
+      leftEl.className = 'metric-value ' + (remaining >= 0 ? 'positive' : 'negative');
+      document.getElementById('dashEntityLabel').textContent = data.settings.currentEntity === 'all' ? '' : '· ' + getEntityName(data.settings.currentEntity);
+      document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' });
+
+      document.getElementById('insightsList').innerHTML = generateInsights().map(i => `<div class="insight ${i.type}">${escapeHtml(i.text)}</div>`).join('');
+
+      const holdings = filteredHoldings();
+      const labels = [], values = [];
+      const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#64748b','#f97316'];
+      holdings.forEach(h => { const val = (h.quantity||0)*(h.currentPrice||0); if (val > 0) { labels.push(h.symbol||'Unknown'); values.push(val); } });
+      const container = document.getElementById('allocationContainer');
+      if (allocationChart) { allocationChart.destroy(); allocationChart = null; }
+      if (!values.length) {
+        container.innerHTML = '<div class="empty"><p>No holdings in this view</p></div>';
+        document.getElementById('allocationLegend').innerHTML = '';
+      } else {
+        container.innerHTML = '<canvas id="allocationChart"></canvas>';
+        allocationChart = new Chart(document.getElementById('allocationChart'), {
+          type: 'doughnut',
+          data: { labels, datasets: [{ data: values, backgroundColor: colors.slice(0, values.length), borderWidth: 0 }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => { const total = ctx.dataset.data.reduce((a,b)=>a+b,0); return `${ctx.label}: ${formatAUD(ctx.raw)} (${((ctx.raw/total)*100).toFixed(1)}%)`; } } } } }
+        });
+        const totalVal = values.reduce((a,b)=>a+b,0);
+        document.getElementById('allocationLegend').innerHTML = labels.map((l,i) => `<div class="flex justify-between text-sm" style="margin:4px 0"><span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colors[i]};margin-right:6px"></span>${escapeHtml(l)}</span><span>${((values[i]/totalVal)*100).toFixed(1)}%</span></div>`).join('');
+      }
+
+      const recent = [...filteredTransactions()].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).slice(0,5);
+      const recentEl = document.getElementById('recentActivity');
+      recentEl.innerHTML = recent.length ? recent.map(t => renderTxRow(t,false)).join('') : '<div class="empty"><p>No transactions yet</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="showSection(\'spending\'); document.getElementById(\'receiptFile\').click();">Scan a receipt</button><button class="btn btn-secondary btn-sm" onclick="openTransactionModal()">Add manually</button></div></div>';
+    }
+
+    function renderPortfolio() {
+      const list = document.getElementById('holdingsList');
+      const holdings = filteredHoldings();
+      if (!holdings.length) list.innerHTML = '<div class="empty"><p>No holdings in this view.</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="openHoldingModal()">Add holding</button></div></div>';
+      else list.innerHTML = holdings.map(h => {
+        const cost = (h.quantity||0)*(h.avgCost||0), value = (h.quantity||0)*(h.currentPrice||0), pnl = value-cost, pnlPct = cost>0?(pnl/cost)*100:0;
+        return `<div class="list-item" style="cursor:pointer" onclick="editHolding('${h.id}')"><div class="list-item-main"><div class="list-item-title">${escapeHtml(h.symbol)} <span class="badge badge-${h.type}">${h.type}</span> <span class="badge badge-entity">${escapeHtml(getEntityName(h.entityId))}</span></div><div class="list-item-sub">${h.quantity} @ ${formatAUD(h.avgCost)} · ${escapeHtml(h.name||'')}</div></div><div class="list-item-value"><div>${formatAUD(value)}</div><div class="text-sm ${pnl>=0?'positive':'negative'}">${formatAUD(pnl)} (${formatPct(pnlPct)})</div></div></div>`;
+      }).join('');
+      const port = calcPortfolio();
+      document.getElementById('portTotalCost').textContent = formatAUD(port.totalCost);
+      document.getElementById('portMarketValue').textContent = formatAUD(port.totalValue);
+    }
+
+    function renderSpending() {
+      const months = new Set();
+      filteredTransactions().forEach(t => { if (t.date) months.add(t.date.slice(0,7)); });
+      months.add(currentMonthKey());
+      const sorted = [...months].sort().reverse();
+      const filter = document.getElementById('spendMonthFilter');
+      const currentVal = filter.value || currentMonthKey();
+      filter.innerHTML = sorted.map(m => { const [y,mo]=m.split('-'); return `<option value="${m}" ${m===currentVal?'selected':''}>${new Date(y,mo-1).toLocaleString('en-AU',{month:'long',year:'numeric'})}</option>`; }).join('');
+      const monthKey = filter.value;
+      const txs = filteredTransactions().filter(t => t.date && t.date.startsWith(monthKey)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+      const list = document.getElementById('transactionsList');
+      list.innerHTML = txs.length ? txs.map(t => renderTxRow(t,true)).join('') : '<div class="empty"><p>No transactions this month</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="document.getElementById(\'receiptFile\').click()">Scan receipt</button><button class="btn btn-secondary btn-sm" onclick="openTransactionModal()">Add transaction</button></div></div>';
+
+      const byCat = {};
+      txs.filter(t => t.amount > 0).forEach(t => { byCat[t.category] = (byCat[t.category]||0) + t.amount; });
+      const labels = Object.keys(byCat), values = Object.values(byCat);
+      const colors = ['#3b82f6','#22c55e','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#64748b','#f97316'];
+      if (spendChart) spendChart.destroy();
+      if (values.length) {
+        spendChart = new Chart(document.getElementById('spendChart'), {
+          type: 'doughnut',
+          data: { labels, datasets: [{ data: values, backgroundColor: colors.slice(0,values.length), borderWidth: 0 }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: getComputedStyle(document.body).getPropertyValue('--text'), boxWidth: 12, padding: 10 } }, tooltip: { callbacks: { label: c => `${c.label}: ${formatAUD(c.raw)}` } } } }
+        });
+      }
+    }
+
+    function renderBudgets() {
+      const monthKey = currentMonthKey();
+      const list = document.getElementById('budgetsList');
+      const f = data.settings.currentEntity;
+      const cats = data.categories.filter(c => c !== 'Income');
+      let html = '';
+      cats.forEach(cat => {
+        let limit = 0;
+        if (f === 'all') Object.keys(data.budgets).forEach(k => { if (k.endsWith('|'+cat)) limit += Number(data.budgets[k])||0; });
+        else limit = Number(data.budgets[f+'|'+cat]) || 0;
+        if (limit <= 0) return;
+        const spent = data.transactions.filter(t => t.date && t.date.startsWith(monthKey) && t.category===cat && t.amount>0 && (f==='all'||t.entityId===f)).reduce((s,t)=>s+t.amount,0);
+        const pct = Math.min(100, (spent/limit)*100);
+        const remaining = limit - spent;
+        let fillClass = pct >= 90 ? 'over' : pct >= 70 ? 'warn' : 'good';
+        html += `<div style="margin-bottom:16px;"><div class="flex justify-between items-center"><div class="list-item-title">${escapeHtml(cat)}</div><div class="text-sm">${formatAUD(spent)} / ${formatAUD(limit)}</div></div><div class="progress-wrap"><div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div></div><div class="text-sm text-muted mt-1">${remaining>=0 ? formatAUD(remaining)+' left' : formatAUD(Math.abs(remaining))+' over'}</div></div>`;
+      });
+      list.innerHTML = html || '<div class="empty"><p>No budgets set for this view.</p><div class="empty-cta"><button class="btn btn-primary btn-sm" onclick="openBudgetModal()">Set budgets</button></div></div>';
+    }
+
+    function renderEntitiesList() {
+      document.getElementById('entitiesList').innerHTML = data.entities.map(e => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${escapeHtml(e.name)}</div><div class="list-item-sub">${e.type}</div></div></div>`).join('') || '<div class="empty"><p>No entities</p></div>';
+    }
+
+    function openHoldingModal(id = null) {
+      document.getElementById('holdingForm').reset();
+      document.getElementById('holdingId').value = '';
+      document.getElementById('deleteHoldingBtn').classList.add('hidden');
+      document.getElementById('holdingModalTitle').textContent = 'Add Holding';
+      populateEntitySelects();
+      if (data.settings.currentEntity !== 'all') document.getElementById('holdingEntity').value = data.settings.currentEntity;
+      if (id) {
+        const h = data.holdings.find(x => x.id === id);
+        if (h) {
+          document.getElementById('holdingId').value = h.id;
+          document.getElementById('holdingEntity').value = h.entityId || 'personal';
+          document.getElementById('holdingType').value = h.type || 'stock';
+          document.getElementById('holdingSymbol').value = h.symbol || '';
+          document.getElementById('holdingName').value = h.name || '';
+          document.getElementById('holdingQty').value = h.quantity || '';
+          document.getElementById('holdingCost').value = h.avgCost || '';
+          document.getElementById('holdingPrice').value = h.currentPrice || '';
+          document.getElementById('holdingNotes').value = h.notes || '';
+          document.getElementById('holdingModalTitle').textContent = 'Edit Holding';
+          document.getElementById('deleteHoldingBtn').classList.remove('hidden');
+        }
+      }
+      document.getElementById('holdingModal').classList.add('open');
+    }
+    function editHolding(id) { openHoldingModal(id); }
+    function saveHolding(e) {
+      e.preventDefault();
+      const id = document.getElementById('holdingId').value;
+      const holding = {
+        id: id || uid(),
+        entityId: document.getElementById('holdingEntity').value,
+        type: document.getElementById('holdingType').value,
+        symbol: document.getElementById('holdingSymbol').value.trim().toUpperCase(),
+        name: document.getElementById('holdingName').value.trim(),
+        quantity: parseFloat(document.getElementById('holdingQty').value) || 0,
+        avgCost: parseFloat(document.getElementById('holdingCost').value) || 0,
+        currentPrice: parseFloat(document.getElementById('holdingPrice').value) || 0,
+        notes: document.getElementById('holdingNotes').value.trim(),
+        updatedAt: new Date().toISOString()
+      };
+      if (id) { const idx = data.holdings.findIndex(h => h.id === id); if (idx >= 0) data.holdings[idx] = holding; }
+      else data.holdings.push(holding);
+      saveData(); closeModal('holdingModal'); renderAll();
+    }
+    function deleteHolding() {
+      const id = document.getElementById('holdingId').value;
+      if (!id || !confirm('Delete this holding?')) return;
+      data.holdings = data.holdings.filter(h => h.id !== id);
+      saveData(); closeModal('holdingModal'); renderAll();
+    }
+
+    function openTransactionModal(id = null) {
+      document.getElementById('transactionForm').reset();
+      document.getElementById('txId').value = '';
+      document.getElementById('txDate').value = today();
+      document.getElementById('deleteTxBtn').classList.add('hidden');
+      document.getElementById('transactionModalTitle').textContent = 'Add Transaction';
+      populateEntitySelects();
+      if (data.settings.currentEntity !== 'all') document.getElementById('txEntity').value = data.settings.currentEntity;
+      document.getElementById('txCategory').innerHTML = data.categories.map(c => `<option value="${c}">${c}</option>`).join('');
+      if (id) {
+        const t = data.transactions.find(x => x.id === id);
+        if (t) {
+          document.getElementById('txId').value = t.id;
+          document.getElementById('txEntity').value = t.entityId || 'personal';
+          document.getElementById('txDate').value = t.date || today();
+          document.getElementById('txDesc').value = t.description || '';
+          document.getElementById('txAmount').value = t.amount || '';
+          document.getElementById('txCategory').value = t.category || 'Other';
+          document.getElementById('transactionModalTitle').textContent = 'Edit Transaction';
+          document.getElementById('deleteTxBtn').classList.remove('hidden');
+        }
+      }
+      document.getElementById('transactionModal').classList.add('open');
+    }
+    function editTransaction(id) { openTransactionModal(id); }
+    function saveTransaction(e) {
+      e.preventDefault();
+      const id = document.getElementById('txId').value;
+      const prev = id ? data.transactions.find(t => t.id === id) : null;
+      const tx = {
+        id: id || uid(),
+        entityId: document.getElementById('txEntity').value,
+        date: document.getElementById('txDate').value,
+        description: document.getElementById('txDesc').value.trim(),
+        amount: parseFloat(document.getElementById('txAmount').value) || 0,
+        category: document.getElementById('txCategory').value
+      };
+      if (prev && prev.thumbnail) tx.thumbnail = prev.thumbnail;
+      if (id) { const idx = data.transactions.findIndex(t => t.id === id); if (idx >= 0) data.transactions[idx] = tx; }
+      else data.transactions.push(tx);
+      saveData(); closeModal('transactionModal'); renderAll();
+    }
+    function deleteTransaction() {
+      const id = document.getElementById('txId').value;
+      if (!id || !confirm('Delete this transaction?')) return;
+      data.transactions = data.transactions.filter(t => t.id !== id);
+      saveData(); closeModal('transactionModal'); renderAll();
+    }
+
+    function openBudgetModal() {
+      populateEntitySelects();
+      if (data.settings.currentEntity !== 'all') document.getElementById('budgetEntity').value = data.settings.currentEntity;
+      const ent = document.getElementById('budgetEntity').value;
+      const container = document.getElementById('budgetInputs');
+      const cats = data.categories.filter(c => c !== 'Income');
+      container.innerHTML = cats.map(cat => {
+        const key = ent + '|' + cat;
+        return `<div class="form-group"><label>${escapeHtml(cat)}</label><input type="number" data-cat="${cat}" step="0.01" min="0" value="${data.budgets[key]||''}" placeholder="0.00" /></div>`;
+      }).join('');
+      document.getElementById('budgetEntity').onchange = () => {
+        const newEnt = document.getElementById('budgetEntity').value;
+        container.querySelectorAll('input').forEach(inp => { inp.value = data.budgets[newEnt+'|'+inp.dataset.cat] || ''; });
+      };
+      document.getElementById('budgetModal').classList.add('open');
+    }
+    function saveBudgets(e) {
+      e.preventDefault();
+      const ent = document.getElementById('budgetEntity').value;
+      document.querySelectorAll('#budgetInputs input').forEach(inp => {
+        const key = ent + '|' + inp.dataset.cat;
+        const val = parseFloat(inp.value);
+        if (val > 0) data.budgets[key] = val; else delete data.budgets[key];
+      });
+      saveData(); closeModal('budgetModal'); renderAll();
+    }
+
+    function openEntityModal() { renderEntityManageList(); resetEntityForm(); document.getElementById('entityModal').classList.add('open'); }
+    function renderEntityManageList() {
+      document.getElementById('entityManageList').innerHTML = data.entities.map(e => `<div class="list-item"><div class="list-item-main"><div class="list-item-title">${escapeHtml(e.name)}</div><div class="list-item-sub">${e.type}</div></div><div class="flex gap-2"><button class="btn btn-secondary btn-sm" onclick="editEntity('${e.id}')">Edit</button><button class="btn btn-danger btn-sm" onclick="deleteEntity('${e.id}')">Del</button></div></div>`).join('');
+    }
+    function editEntity(id) {
+      const e = data.entities.find(x => x.id === id);
+      if (!e) return;
+      document.getElementById('entityId').value = e.id;
+      document.getElementById('entityName').value = e.name;
+      document.getElementById('entityType').value = e.type || 'other';
+    }
+    function resetEntityForm() {
+      document.getElementById('entityId').value = '';
+      document.getElementById('entityName').value = '';
+      document.getElementById('entityType').value = 'company';
+    }
+    function saveEntity(e) {
+      e.preventDefault();
+      const id = document.getElementById('entityId').value;
+      const name = document.getElementById('entityName').value.trim();
+      const type = document.getElementById('entityType').value;
+      if (!name) return;
+      if (id) { const ent = data.entities.find(x => x.id === id); if (ent) { ent.name = name; ent.type = type; } }
+      else data.entities.push({ id: uid(), name, type });
+      saveData(); populateEntitySelects(); renderEntityManageList(); resetEntityForm(); renderAll();
+    }
+    function deleteEntity(id) {
+      if (data.entities.length <= 1) { alert('You need at least one entity.'); return; }
+      if (!confirm('Delete this entity? Holdings and transactions will be moved to another entity.')) return;
+      const fallback = data.entities.find(e => e.id !== id)?.id || 'personal';
+      data.holdings.forEach(h => { if (h.entityId === id) h.entityId = fallback; });
+      data.transactions.forEach(t => { if (t.entityId === id) t.entityId = fallback; });
+      Object.keys(data.budgets).forEach(k => { if (k.startsWith(id+'|')) delete data.budgets[k]; });
+      data.entities = data.entities.filter(e => e.id !== id);
+      if (data.settings.currentEntity === id) data.settings.currentEntity = 'all';
+      saveData(); populateEntitySelects(); renderEntityManageList(); renderAll();
+    }
+
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('csvFile');
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragover'); });
+    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+    dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragover'); if (e.dataTransfer.files.length) handleCSV(e.dataTransfer.files[0]); });
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) handleCSV(fileInput.files[0]); });
+
+    function handleCSV(file) {
+      const reader = new FileReader();
+      reader.onload = e => { try { const rows = parseCSV(e.target.result); if (rows.length < 2) { alert('CSV appears empty'); return; } previewImport(rows); } catch (err) { alert('Parse failed: ' + err.message); } };
+      reader.readAsText(file);
+    }
+    function parseCSV(text) {
+      return text.trim().split(/\r?\n/).map(line => {
+        const result = []; let current = ''; let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') inQuotes = !inQuotes;
+          else if (char === ',' && !inQuotes) { result.push(current.trim()); current = ''; }
+          else current += char;
+        }
+        result.push(current.trim()); return result;
+      });
+    }
+    function previewImport(rows) {
+      const headers = rows[0].map(h => h.toLowerCase());
+      let dateIdx = headers.findIndex(h => h.includes('date') || h.includes('posted'));
+      let descIdx = headers.findIndex(h => h.includes('desc') || h.includes('narration') || h.includes('particulars') || h.includes('memo') || h.includes('details'));
+      let amountIdx = headers.findIndex(h => h.includes('amount') || h.includes('value'));
+      let debitIdx = headers.findIndex(h => h.includes('debit'));
+      let creditIdx = headers.findIndex(h => h.includes('credit'));
+      if (dateIdx < 0) dateIdx = 0; if (descIdx < 0) descIdx = 1; if (amountIdx < 0 && debitIdx < 0) amountIdx = 2;
+      const preview = document.getElementById('importPreview');
+      preview.classList.remove('hidden');
+      preview.innerHTML = `<p class="text-sm mb-2">Detected ${rows.length-1} rows.</p><div class="form-group"><label>Assign to entity</label><select id="importEntity">${data.entities.map(e=>`<option value="${e.id}">${escapeHtml(e.name)}</option>`).join('')}</select></div><div class="text-sm" style="max-height:160px;overflow-y:auto;margin-bottom:12px;">${rows.slice(1,5).map(r=>`<div>${r[dateIdx]||''} — ${r[descIdx]||''} — ${r[amountIdx]||r[debitIdx]||''}</div>`).join('')}${rows.length>5?'<div>… and more</div>':''}</div><button class="btn btn-primary btn-block" id="confirmImport">Import as Transactions</button>`;
+      document.getElementById('confirmImport').onclick = () => {
+        const entityId = document.getElementById('importEntity').value;
+        let imported = 0;
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i]; if (!row || row.length < 2) continue;
+          let amount = 0;
+          if (amountIdx >= 0 && row[amountIdx]) amount = parseFloat(String(row[amountIdx]).replace(/[^0-9.\-]/g,'')) || 0;
+          else if (debitIdx >= 0 || creditIdx >= 0) {
+            const debit = debitIdx >= 0 ? parseFloat(String(row[debitIdx]||'').replace(/[^0-9.\-]/g,''))||0 : 0;
+            const credit = creditIdx >= 0 ? parseFloat(String(row[creditIdx]||'').replace(/[^0-9.\-]/g,''))||0 : 0;
+            amount = debit > 0 ? debit : -credit;
+          }
+          if (amount === 0) continue;
+          let dateStr = row[dateIdx] || today();
+          const d = new Date(dateStr); if (!isNaN(d.getTime())) dateStr = d.toISOString().slice(0,10);
+          data.transactions.push({ id: uid(), entityId, date: dateStr, description: (row[descIdx]||'Imported').slice(0,120), amount, category: 'Other' });
+          imported++;
+        }
+        saveData();
+        preview.innerHTML = `<p class="text-sm positive">Imported ${imported} transactions into ${getEntityName(entityId)}.</p>`;
+        renderAll();
+      };
+    }
+
+    function exportJSON() {
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `vault-backup-${today()}.json`; a.click();
+    }
+    function exportCSV() {
+      let csv = 'Type,Entity,Date,Symbol/Description,Quantity,Amount,Category,Notes\n';
+      data.holdings.forEach(h => { csv += `Holding,${getEntityName(h.entityId)},${h.updatedAt||''},${h.symbol},${h.quantity},${h.currentPrice},,"${(h.notes||'').replace(/"/g,'""')}"\n`; });
+      data.transactions.forEach(t => { csv += `Transaction,${getEntityName(t.entityId)},${t.date},"${(t.description||'').replace(/"/g,'""')}",,${t.amount},${t.category},\n`; });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `vault-export-${today()}.csv`; a.click();
+    }
+    function clearAllData() {
+      if (!confirm('Permanently delete all data?') || !confirm('Really sure?')) return;
+      data = { entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)), holdings: [], transactions: [], budgets: {}, categories: [...DEFAULT_CATEGORIES], settings: { theme: data.settings.theme, currentEntity: 'all', onboardingDismissed: data.settings.onboardingDismissed, aiApiBase: data.settings.aiApiBase||'', aiApiKey: data.settings.aiApiKey||'', aiModel: data.settings.aiModel||'gpt-4o-mini' } };
+      saveData(); populateEntitySelects(); renderAll(); alert('All data cleared.');
+    }
+    function calcDCA() {
+      const amount = parseFloat(document.getElementById('dcaAmount').value)||0;
+      const freq = parseFloat(document.getElementById('dcaFreq').value)||12;
+      const years = parseFloat(document.getElementById('dcaYears').value)||5;
+      const annualReturn = (parseFloat(document.getElementById('dcaReturn').value)||0)/100;
+      if (amount <= 0 || years <= 0) { document.getElementById('dcaResult').textContent = 'Enter valid values.'; return; }
+      const periods = freq * years; const r = annualReturn / freq;
+      const futureValue = r === 0 ? amount * periods : amount * ((Math.pow(1+r, periods)-1)/r);
+      const totalInvested = amount * periods;
+      document.getElementById('dcaResult').innerHTML = `<strong>Projected value:</strong> ${formatAUD(futureValue)}<br>Total invested: ${formatAUD(totalInvested)}<br>Estimated growth: ${formatAUD(futureValue-totalInvested)}`;
+    }
+
+    let pendingReceiptThumb = null;
+
+    function renderTxRow(t, clickable) {
+      const thumb = t.thumbnail ? `<img class="receipt-thumb" src="${t.thumbnail}" alt="" />` : '';
+      const click = clickable ? ` style="cursor:pointer" onclick="editTransaction('${t.id}')"` : '';
+      return `<div class="list-item"${click}><div class="list-item-main"><div class="list-item-title">${thumb}${escapeHtml(t.description)}</div><div class="list-item-sub">${t.date} · ${t.category} · ${getEntityName(t.entityId)}</div></div><div class="list-item-value ${t.amount>0?'negative':'positive'}">${t.amount>0?'-':'+'}${formatAUD(Math.abs(t.amount))}</div></div>`;
+    }
+
+    function updateOnboarding() {
+      const tip = document.getElementById('onboardingTip');
+      if (!tip) return;
+      tip.classList.toggle('hidden', !!data.settings.onboardingDismissed);
+    }
+    function dismissOnboarding() {
+      data.settings.onboardingDismissed = true;
+      saveData();
+      updateOnboarding();
+    }
+
+    function populateAiSettingsForm() {
+      const s = data.settings || {};
+      const base = document.getElementById('aiApiBase');
+      const key = document.getElementById('aiApiKey');
+      const model = document.getElementById('aiModel');
+      if (base) base.value = s.aiApiBase || '';
+      if (key) key.value = s.aiApiKey || '';
+      if (model) model.value = s.aiModel || 'gpt-4o-mini';
+    }
+    function saveAiSettings() {
+      data.settings.aiApiBase = (document.getElementById('aiApiBase').value || '').trim().replace(/\/$/, '');
+      data.settings.aiApiKey = (document.getElementById('aiApiKey').value || '').trim();
+      data.settings.aiModel = (document.getElementById('aiModel').value || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
+      saveData();
+      const st = document.getElementById('aiSettingsStatus');
+      st.textContent = data.settings.aiApiKey ? 'Saved. Vision extract enabled when scanning images.' : 'Saved. Using heuristics + manual entry only.';
+    }
+
+    function setReceiptEntityQuick(id) {
+      const el = document.getElementById('rcptEntity');
+      if ([...el.options].some(o => o.value === id)) el.value = id;
+      document.getElementById('rcptEntPersonal').classList.toggle('active', id === 'personal');
+      document.getElementById('rcptEntBusiness').classList.toggle('active', id === 'business');
+    }
+
+    function heuristicSuggest(text) {
+      const t = (text || '').toLowerCase();
+      let category = 'Other';
+      let entityId = 'personal';
+      let description = '';
+
+      const isFuel = /\b(fuel|petrol|diesel|ampol|caltex|7-?eleven|bp\b|shell\b|united petroleum|mobil|metro petroleum)\b/.test(t);
+      const isTools = /\b(bunnings|total tools|tools?|hardware|electrical|wholesaler|mitre 10|blackwoods|repco)\b/.test(t);
+      const isMaterials = /\b(materials?|timber|cement|plumbing|paint|gyprock)\b/.test(t);
+      const isUtil = /\b(synergy|agl|telstra|optus|water|utility|utilities|electricity|gas bill|power bill|internet bill)\b/.test(t);
+      const isSub = /\b(subcontractor|sub-?contract|labour hire|contractor)\b/.test(t);
+
+      if (isFuel) {
+        category = 'Fuel';
+        entityId = 'personal';
+        description = extractMerchantHint(t, ['ampol','shell','bp','caltex','7-eleven','7 eleven','united']);
+      } else if (isTools || isMaterials) {
+        category = isTools && !isMaterials ? 'Tools' : (isMaterials && !isTools ? 'Materials' : (isTools ? 'Tools' : 'Materials'));
+        if (/\bbunnings|total tools|hardware|electrical|wholesaler\b/.test(t) && isMaterials) category = 'Materials';
+        else if (isTools) category = 'Tools';
+        else category = 'Materials';
+        entityId = 'business';
+        description = extractMerchantHint(t, ['bunnings','total tools','mitre 10','blackwoods']);
+      } else if (isUtil) {
+        category = 'Utilities';
+        entityId = 'personal';
+        description = extractMerchantHint(t, ['synergy','agl','telstra','optus']);
+      } else if (isSub) {
+        category = 'Subcontractors';
+        entityId = 'business';
+      }
+
+      const amount = extractAmount(t);
+      const date = extractDate(t) || today();
+      if (!description) {
+        const line = (text || '').split(/[\n\r]+/).map(s => s.trim()).find(s => s.length > 2 && s.length < 60);
+        description = line || '';
+      }
+      return { description: description.slice(0, 120), category, entityId, amount, date };
+    }
+
+    function extractMerchantHint(t, names) {
+      for (const n of names) {
+        if (t.includes(n)) return n.replace(/\b\w/g, c => c.toUpperCase());
+      }
+      return '';
+    }
+    function extractAmount(t) {
+      const matches = [...String(t).matchAll(/(?:AUD\s*)?\$?\s*(\d{1,6}(?:[.,]\d{2}))/gi)];
+      if (!matches.length) return null;
+      // prefer last currency-like amount (often total)
+      const raw = matches[matches.length - 1][1].replace(',', '.');
+      const n = parseFloat(raw);
+      return isNaN(n) ? null : n;
+    }
+    function extractDate(t) {
+      const m1 = String(t).match(/\b(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/);
+      if (m1) {
+        const d = `${m1[1]}-${String(m1[2]).padStart(2,'0')}-${String(m1[3]).padStart(2,'0')}`;
+        if (!isNaN(new Date(d).getTime())) return d;
+      }
+      const m2 = String(t).match(/\b(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{2,4})\b/);
+      if (m2) {
+        let y = m2[3]; if (y.length === 2) y = '20' + y;
+        const d = `${y}-${String(m2[2]).padStart(2,'0')}-${String(m2[1]).padStart(2,'0')}`;
+        if (!isNaN(new Date(d).getTime())) return d;
+      }
+      return null;
+    }
+
+    async function fileToDataURL(file, maxEdge = 640, quality = 0.7) {
+      if (!file.type.startsWith('image/')) return null;
+      return new Promise((resolve) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+        img.onload = () => {
+          let w = img.width, h = img.height;
+          const scale = Math.min(1, maxEdge / Math.max(w, h));
+          w = Math.round(w * scale); h = Math.round(h * scale);
+          const canvas = document.createElement('canvas');
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          URL.revokeObjectURL(url);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        img.src = url;
+      });
+    }
+
+    async function extractPdfText(file) {
+      try {
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let raw = '';
+        // lightweight text scrape from PDF streams (best-effort, no PDF.js)
+        const decoder = new TextDecoder('latin1');
+        const s = decoder.decode(bytes);
+        const parts = [];
+        const re = /\((?:\\.|[^\\)]){2,120}\)/g;
+        let m;
+        while ((m = re.exec(s)) && parts.length < 200) {
+          let str = m[0].slice(1, -1).replace(/\\n/g, ' ').replace(/\\(.)/g, '$1');
+          if (/[A-Za-z0-9]/.test(str)) parts.push(str);
+        }
+        raw = parts.join(' ');
+        if (raw.length < 8) raw = file.name || '';
+        return raw;
+      } catch (e) {
+        return file.name || '';
+      }
+    }
+
+    async function visionExtract(dataUrl) {
+      const base = (data.settings.aiApiBase || 'https://api.openai.com/v1').replace(/\/$/, '');
+      const key = data.settings.aiApiKey;
+      const model = data.settings.aiModel || 'gpt-4o-mini';
+      if (!key) return null;
+      const body = {
+        model,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          { role: 'system', content: 'Extract receipt fields as JSON with keys: merchant, date (YYYY-MM-DD if possible), amount (number, total paid), raw_text (short). No markdown.' },
+          { role: 'user', content: [
+            { type: 'text', text: 'Read this receipt image and return JSON.' },
+            { type: 'image_url', image_url: { url: dataUrl } }
+          ]}
+        ]
+      };
+      const res = await fetch(base + '/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) throw new Error('Vision API ' + res.status);
+      const json = await res.json();
+      const content = json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content;
+      if (!content) throw new Error('Empty vision response');
+      return JSON.parse(content);
+    }
+
+    async function handleReceiptFile(file) {
+      if (!file) return;
+      pendingReceiptThumb = null;
+      const status = document.getElementById('receiptScanStatus');
+      const previewWrap = document.getElementById('receiptPreviewWrap');
+      const preview = document.getElementById('receiptPreview');
+      document.getElementById('receiptForm').reset();
+      document.getElementById('rcptDate').value = today();
+      populateEntitySelects();
+      document.getElementById('rcptCategory').innerHTML = data.categories.map(c => `<option value="${c}">${c}</option>`).join('');
+      status.textContent = 'Reading receipt…';
+      previewWrap.classList.add('hidden');
+
+      let textBlob = (file.name || '') + ' ';
+      let vision = null;
+
+      try {
+        if (file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif)$/i.test(file.name)) {
+          const dataUrl = await fileToDataURL(file, 960, 0.75);
+          const thumb = await fileToDataURL(file, 240, 0.6);
+          pendingReceiptThumb = thumb;
+          if (dataUrl) {
+            preview.src = dataUrl;
+            previewWrap.classList.remove('hidden');
+          }
+          if (data.settings.aiApiKey) {
+            status.textContent = 'Calling vision API…';
+            try {
+              vision = await visionExtract(dataUrl);
+              if (vision) {
+                textBlob += ' ' + (vision.merchant || '') + ' ' + (vision.raw_text || '') + ' ' + (vision.date || '') + ' ' + (vision.amount != null ? String(vision.amount) : '');
+              }
+            } catch (err) {
+              status.textContent = 'Vision failed (' + err.message + '). Using heuristics / manual entry.';
+            }
+          } else {
+            status.textContent = 'No API key — heuristics from filename + manual review.';
+          }
+        } else if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+          status.textContent = 'Extracting PDF text…';
+          textBlob += await extractPdfText(file);
+        } else {
+          status.textContent = 'Unsupported type — fill fields manually.';
+        }
+      } catch (e) {
+        status.textContent = 'Could not read file. Enter details manually.';
+      }
+
+      const guess = heuristicSuggest(textBlob);
+      if (vision) {
+        if (vision.merchant) guess.description = String(vision.merchant).slice(0, 120);
+        if (vision.date && /^\d{4}-\d{2}-\d{2}$/.test(vision.date)) guess.date = vision.date;
+        if (vision.amount != null && !isNaN(Number(vision.amount))) guess.amount = Number(vision.amount);
+        // re-run category/entity on merchant+raw
+        const again = heuristicSuggest((vision.merchant || '') + ' ' + (vision.raw_text || '') + ' ' + textBlob);
+        guess.category = again.category;
+        guess.entityId = again.entityId;
+      }
+
+      document.getElementById('rcptDesc').value = guess.description || file.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
+      document.getElementById('rcptDate').value = guess.date || today();
+      document.getElementById('rcptAmount').value = guess.amount != null ? guess.amount : '';
+      if (data.categories.includes(guess.category)) document.getElementById('rcptCategory').value = guess.category;
+      else document.getElementById('rcptCategory').value = 'Other';
+      if ([...document.getElementById('rcptEntity').options].some(o => o.value === guess.entityId)) {
+        document.getElementById('rcptEntity').value = guess.entityId;
+      }
+      setReceiptEntityQuick(document.getElementById('rcptEntity').value);
+      if (!status.textContent.includes('Vision failed') && !status.textContent.includes('No API')) {
+        status.textContent = 'Review suggested fields, then Confirm & Save.';
+      }
+      document.getElementById('receiptModal').classList.add('open');
+      showSection('spending');
+    }
+
+    function confirmReceiptSave(e) {
+      e.preventDefault();
+      const tx = {
+        id: uid(),
+        entityId: document.getElementById('rcptEntity').value,
+        date: document.getElementById('rcptDate').value,
+        description: document.getElementById('rcptDesc').value.trim(),
+        amount: Math.abs(parseFloat(document.getElementById('rcptAmount').value) || 0),
+        category: document.getElementById('rcptCategory').value
+      };
+      if (!tx.description || !tx.date || !(tx.amount > 0)) {
+        alert('Please fill description, date, and a positive amount.');
+        return;
+      }
+      if (pendingReceiptThumb) tx.thumbnail = pendingReceiptThumb;
+      data.transactions.push(tx);
+      saveData();
+      pendingReceiptThumb = null;
+      closeModal('receiptModal');
+      renderAll();
+    }
+
+    const receiptInput = document.getElementById('receiptFile');
+    if (receiptInput) {
+      receiptInput.addEventListener('change', () => {
+        if (receiptInput.files && receiptInput.files[0]) {
+          handleReceiptFile(receiptInput.files[0]);
+          receiptInput.value = '';
+        }
+      });
+    }
+
+
+    function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+    document.querySelectorAll('.modal-overlay').forEach(overlay => {
+      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
+    });
+
+    loadData();
+    renderAll();
+  </script>
+</body>
+</html>
