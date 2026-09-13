@@ -7,7 +7,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#000000" />
-  <title>Ledger · 20260912-0527</title>
+  <title>Ledger · 20260913-budget-period</title>
   <!-- Chart.js vendor (local). Fallback CDN: https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js -->
   <script src="vendor/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
@@ -332,7 +332,12 @@
       <div class="card">
         <div class="card-header">
           <div class="card-title">Budget plan</div>
-          <select id="budgetMonthFilter" class="btn btn-secondary btn-sm" onchange="renderBudgets()" style="max-width:150px;padding:6px 8px;"></select>
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            <button type="button" class="btn btn-secondary btn-sm" id="budgetPeriodWeek" onclick="setBudgetPeriod('week')">Weekly</button>
+            <button type="button" class="btn btn-primary btn-sm" id="budgetPeriodMonth" onclick="setBudgetPeriod('month')">Monthly</button>
+            <button type="button" class="btn btn-secondary btn-sm" id="budgetPeriodYear" onclick="setBudgetPeriod('year')">Yearly</button>
+            <select id="budgetMonthFilter" class="btn btn-secondary btn-sm" onchange="renderBudgets()" style="max-width:180px;padding:6px 8px;"></select>
+          </div>
         </div>
         <div class="flex gap-2 mb-2" style="flex-wrap:wrap;">
           <button class="btn btn-secondary btn-sm" onclick="suggestBudgetsFromTransactions()">Suggest from bills</button>
@@ -421,7 +426,7 @@
   <div class="disclaimer">
     Ledger is a personal tracking tool only. It does not provide financial, investment or tax advice.
     Past performance is not indicative of future results. Always do your own research.
-    <div class="text-sm" style="margin-top:8px;opacity:0.8">Build 20260912-charts</div>
+    <div class="text-sm" style="margin-top:8px;opacity:0.8">Build 20260913-budget-period</div>
   </div>
 
   <nav>
@@ -547,9 +552,18 @@
   <!-- Budget Modal -->
   <div class="modal-overlay" id="budgetModal">
     <div class="modal">
-      <div class="modal-header"><div class="modal-title">Edit Monthly Budgets</div><button class="close-btn" onclick="closeModal('budgetModal')">×</button></div>
+      <div class="modal-header"><div class="modal-title">Edit Budget Limits</div><button class="close-btn" onclick="closeModal('budgetModal')">×</button></div>
       <form id="budgetForm" onsubmit="saveBudgets(event)">
         <div class="form-group"><label>Entity for these budgets</label><select id="budgetEntity"></select></div>
+        <div class="form-group">
+          <label>Enter as</label>
+          <select id="budgetEnterPeriod" onchange="refreshBudgetModalInputs()">
+            <option value="week">Weekly</option>
+            <option value="month" selected>Monthly</option>
+            <option value="year">Yearly</option>
+          </select>
+          <p class="text-sm text-muted mt-1">Storage is always monthly AUD. Amounts you enter are converted to monthly on save.</p>
+        </div>
         <div id="budgetInputs"></div>
         <button type="submit" class="btn btn-primary btn-block">Save Budgets</button>
       </form>
@@ -620,7 +634,7 @@
       budgetTraining: [],
       valueHistory: [],
       categories: [...DEFAULT_CATEGORIES],
-      settings: { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini' }
+      settings: { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini', budgetPeriod: 'month' }
     };
     let allocationChart = null, spendChart = null, investTrendChart = null, investSplitChart = null, recurringBillsChart = null, monthlyBillsChart = null;
 
@@ -635,7 +649,8 @@
         if (raw) {
           const parsed = JSON.parse(raw);
           data = { ...data, ...parsed };
-          data.settings = { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini', ...(parsed.settings || {}) };
+          data.settings = { theme: 'dark', currentEntity: 'all', onboardingDismissed: false, aiApiBase: '', aiApiKey: '', aiModel: 'gpt-4o-mini', budgetPeriod: 'month', ...(parsed.settings || {}) };
+          data.settings.budgetPeriod = normalizeBudgetPeriod(data.settings.budgetPeriod);
           if (!data.entities || !data.entities.length) data.entities = JSON.parse(JSON.stringify(DEFAULT_ENTITIES));
           if (!Array.isArray(data.budgetTraining)) data.budgetTraining = [];
           if (!Array.isArray(data.accounts)) data.accounts = [];
@@ -849,6 +864,136 @@
         if (f === 'all' || ent === f) total += Number(data.budgets[key]) || 0;
       });
       return total;
+    }
+
+    function normalizeBudgetPeriod(p) {
+      return (p === 'week' || p === 'year') ? p : 'month';
+    }
+    function getBudgetPeriod() {
+      return normalizeBudgetPeriod(data.settings && data.settings.budgetPeriod);
+    }
+    function monthlyToPeriod(monthly, period) {
+      const m = Number(monthly) || 0;
+      const p = normalizeBudgetPeriod(period);
+      if (p === 'week') return m * 12 / 52;
+      if (p === 'year') return m * 12;
+      return m;
+    }
+    function periodToMonthly(amount, period) {
+      const a = Number(amount) || 0;
+      const p = normalizeBudgetPeriod(period);
+      if (p === 'week') return a * 52 / 12;
+      if (p === 'year') return a / 12;
+      return a;
+    }
+    function periodWord(period) {
+      const p = normalizeBudgetPeriod(period);
+      return p === 'week' ? 'weekly' : p === 'year' ? 'yearly' : 'monthly';
+    }
+    function periodUnit(period) {
+      const p = normalizeBudgetPeriod(period);
+      return p === 'week' ? 'week' : p === 'year' ? 'year' : 'month';
+    }
+    function ymdLocal(d) {
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+    function startOfIsoWeek(d) {
+      const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const day = date.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      date.setDate(date.getDate() + diff);
+      return date;
+    }
+    function formatWeekRangeLabel(mondayStr) {
+      const [y, m, d] = mondayStr.split('-').map(Number);
+      const start = new Date(y, m - 1, d);
+      const end = new Date(y, m - 1, d + 6);
+      const thisMon = ymdLocal(startOfIsoWeek(new Date()));
+      const prefix = mondayStr === thisMon ? 'This week' : 'Week';
+      const startDay = start.getDate();
+      const endDay = end.getDate();
+      const startMon = start.toLocaleString('en-AU', { month: 'short' });
+      const endMon = end.toLocaleString('en-AU', { month: 'short' });
+      if (start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear()) {
+        return prefix + ' (' + startDay + '–' + endDay + ' ' + endMon + ')';
+      }
+      return prefix + ' (' + startDay + ' ' + startMon + '–' + endDay + ' ' + endMon + ')';
+    }
+    function collectWeekStarts() {
+      const set = new Set();
+      const now = new Date();
+      for (let i = 0; i < 8; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i * 7);
+        set.add(ymdLocal(startOfIsoWeek(d)));
+      }
+      data.transactions.forEach(t => {
+        if (!t.date || t.date.length < 10) return;
+        const [y, m, day] = t.date.split('-').map(Number);
+        if (!y || !m || !day) return;
+        set.add(ymdLocal(startOfIsoWeek(new Date(y, m - 1, day))));
+      });
+      return [...set].sort().reverse();
+    }
+    function collectBudgetYears() {
+      const years = new Set();
+      years.add(String(new Date().getFullYear()));
+      data.transactions.forEach(t => { if (t.date) years.add(t.date.slice(0, 4)); });
+      return [...years].filter(y => /^\d{4}$/.test(y)).sort().reverse();
+    }
+    function setBudgetPeriod(period) {
+      data.settings.budgetPeriod = normalizeBudgetPeriod(period);
+      saveData();
+      updateBudgetPeriodButtons();
+      renderBudgets();
+    }
+    function updateBudgetPeriodButtons() {
+      const p = getBudgetPeriod();
+      [['budgetPeriodWeek', 'week'], ['budgetPeriodMonth', 'month'], ['budgetPeriodYear', 'year']].forEach(([id, mode]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.className = 'btn btn-sm ' + (p === mode ? 'btn-primary' : 'btn-secondary');
+      });
+    }
+    function getBudgetViewPeriod() {
+      const mode = getBudgetPeriod();
+      const filter = document.getElementById('budgetMonthFilter');
+      if (mode === 'week') {
+        const weeks = collectWeekStarts();
+        let key = (filter && filter.value) || ymdLocal(startOfIsoWeek(new Date()));
+        if (!weeks.includes(key)) key = ymdLocal(startOfIsoWeek(new Date()));
+        if (filter) {
+          filter.innerHTML = weeks.map(w => `<option value="${w}" ${w===key?'selected':''}>${escapeHtml(formatWeekRangeLabel(w))}</option>`).join('');
+          key = filter.value || key;
+        }
+        const [y, m, d] = key.split('-').map(Number);
+        const end = ymdLocal(new Date(y, m - 1, d + 6));
+        return { mode, start: key, end, monthKey: null, weekStart: key, label: formatWeekRangeLabel(key) };
+      }
+      if (mode === 'year') {
+        const years = collectBudgetYears();
+        let year = (filter && filter.value) || String(new Date().getFullYear());
+        if (!years.includes(year)) year = String(new Date().getFullYear());
+        if (filter) {
+          filter.innerHTML = years.map(y => `<option value="${y}" ${y===year?'selected':''}>${y}</option>`).join('');
+          year = filter.value || year;
+        }
+        return { mode, start: year + '-01-01', end: year + '-12-31', monthKey: null, year, label: year };
+      }
+      const months = new Set();
+      data.transactions.forEach(t => { if (t.date) months.add(t.date.slice(0, 7)); });
+      months.add(currentMonthKey());
+      const sortedMonths = [...months].sort().reverse();
+      let monthKey = (filter && filter.value) || currentMonthKey();
+      if (!sortedMonths.includes(monthKey)) monthKey = currentMonthKey();
+      if (filter) {
+        filter.innerHTML = sortedMonths.map(mk => {
+          const [y, mo] = mk.split('-');
+          return `<option value="${mk}" ${mk===monthKey?'selected':''}>${new Date(y, mo-1).toLocaleString('en-AU',{month:'long',year:'numeric'})}</option>`;
+        }).join('');
+        monthKey = filter.value || monthKey;
+      }
+      const [y, mo] = monthKey.split('-');
+      return { mode: 'month', start: monthKey + '-01', end: monthKey + '-31', monthKey, label: new Date(y, mo - 1).toLocaleString('en-AU', { month: 'long', year: 'numeric' }) };
     }
 
 
@@ -1783,11 +1928,15 @@
       renderBudgets();
     }
 
-    function budgetSubBreakdown(cat, monthKey, entityFilter) {
-      const txs = data.transactions.filter(t =>
-        t.date && t.date.startsWith(monthKey) && t.amount > 0 &&
-        t.category === cat && (entityFilter === 'all' || t.entityId === entityFilter)
-      );
+    function budgetSubBreakdown(cat, monthKeyOrPeriod, entityFilter) {
+      const txs = data.transactions.filter(t => {
+        if (!t.date || t.amount <= 0 || t.category !== cat) return false;
+        if (entityFilter !== 'all' && t.entityId !== entityFilter) return false;
+        if (typeof monthKeyOrPeriod === 'string') return t.date.startsWith(monthKeyOrPeriod);
+        if (monthKeyOrPeriod && monthKeyOrPeriod.monthKey) return t.date.startsWith(monthKeyOrPeriod.monthKey);
+        if (monthKeyOrPeriod && monthKeyOrPeriod.start && monthKeyOrPeriod.end) return t.date >= monthKeyOrPeriod.start && t.date <= monthKeyOrPeriod.end;
+        return false;
+      });
       const buckets = {};
       txs.forEach(t => {
         const desc = t.description || '';
@@ -1836,33 +1985,23 @@
       const list = document.getElementById('budgetsList');
       const summary = document.getElementById('budgetSummary');
       const f = data.settings.currentEntity;
-      const months = new Set();
-      data.transactions.forEach(t => { if (t.date) months.add(t.date.slice(0,7)); });
-      months.add(currentMonthKey());
-      const sortedMonths = [...months].sort().reverse();
-      const filter = document.getElementById('budgetMonthFilter');
-      let monthKey = (filter && filter.value) || currentMonthKey();
-      if (filter) {
-        if (!sortedMonths.includes(monthKey)) monthKey = currentMonthKey();
-        filter.innerHTML = sortedMonths.map(m => {
-          const [y, mo] = m.split('-');
-          return `<option value="${m}" ${m===monthKey?'selected':''}>${new Date(y, mo-1).toLocaleString('en-AU',{month:'long',year:'numeric'})}</option>`;
-        }).join('');
-        monthKey = filter.value || monthKey;
-      }
-
-      const period = { mode: 'month', monthKey, start: monthKey+'-01', end: monthKey+'-31', label: monthKey };
+      updateBudgetPeriodButtons();
+      const period = getBudgetViewPeriod();
+      const viewMode = period.mode || 'month';
+      const pWord = periodWord(viewMode);
+      const pUnit = periodUnit(viewMode);
       const cf = calcCashflow(period, true);
 
       const rows = [];
       const cats = data.categories.filter(c => c !== 'Income' && c !== 'Salary');
       cats.forEach(cat => {
-        let limit = 0;
-        if (f === 'all') Object.keys(data.budgets).forEach(k => { if (k.endsWith('|'+cat)) limit += Number(data.budgets[k])||0; });
-        else limit = Number(data.budgets[f+'|'+cat]) || 0;
-        if (limit <= 0) return;
-        const spent = data.transactions.filter(t => t.date && t.date.startsWith(monthKey) && t.category===cat && t.amount>0 && (f==='all'||t.entityId===f)).reduce((s,t)=>s+t.amount,0);
-        rows.push({ cat, limit, spent, remaining: limit - spent, pct: limit > 0 ? (spent/limit)*100 : 0 });
+        let monthlyLimit = 0;
+        if (f === 'all') Object.keys(data.budgets).forEach(k => { if (k.endsWith('|'+cat)) monthlyLimit += Number(data.budgets[k])||0; });
+        else monthlyLimit = Number(data.budgets[f+'|'+cat]) || 0;
+        if (monthlyLimit <= 0) return;
+        const limit = monthlyToPeriod(monthlyLimit, viewMode);
+        const spent = data.transactions.filter(t => t.date && txInPeriod(t, period) && t.category===cat && t.amount>0 && (f==='all'||t.entityId===f)).reduce((s,t)=>s+t.amount,0);
+        rows.push({ cat, limit, monthlyLimit, spent, remaining: limit - spent, pct: limit > 0 ? (spent/limit)*100 : 0 });
       });
       rows.sort((a,b) => b.pct - a.pct || b.limit - a.limit);
 
@@ -1878,8 +2017,8 @@
         const over = totalSpentInBudget > totalBudget;
         summary.innerHTML = `
           <div class="metric-grid">
-            <div class="metric"><div class="metric-label">Income</div><div class="metric-value positive">${formatAUD(cf.income)}</div></div>
-            <div class="metric"><div class="metric-label">Budgeted</div><div class="metric-value">${formatAUD(totalBudget)}</div></div>
+            <div class="metric"><div class="metric-label">Income (${pWord})</div><div class="metric-value positive">${formatAUD(cf.income)}</div></div>
+            <div class="metric"><div class="metric-label">Budgeted (${pWord})</div><div class="metric-value">${formatAUD(totalBudget)}</div></div>
             <div class="metric"><div class="metric-label">Spent (in budget)</div><div class="metric-value negative">${formatAUD(totalSpentInBudget)}</div></div>
             <div class="metric"><div class="metric-label">${budgetLeft>=0?'Left in plan':'Over plan'}</div><div class="metric-value ${budgetLeft>=0?'positive':'negative'}">${formatAUD(Math.abs(budgetLeft))}</div></div>
           </div>
@@ -1888,7 +2027,8 @@
             ${over?'':`<div class="seg-left" style="width:${100-spentPct}%"></div>`}
           </div>
           <p class="text-sm text-muted">Plan vs income: <strong class="${planGap>=0?'positive':'negative'}">${planGap>=0?'+':'-'}${formatAUD(Math.abs(planGap))}</strong> · Actual cash surplus: <strong class="${actualGap>=0?'positive':'negative'}">${actualGap>=0?'+':'-'}${formatAUD(Math.abs(actualGap))}</strong>${unbudgetedSpend>0?` · Uncategorised/other spend ${formatAUD(unbudgetedSpend)}`:''}</p>
-          ${totalSpentInBudget===0 && totalBudget>0 ? `<p class="text-sm text-muted mt-1">No spending hit these budget categories yet this month — fix categories in <button type="button" class="btn btn-secondary btn-sm" onclick="showSection('spending')">Spend → Review</button></p>` : ''}
+          <p class="text-sm text-muted">${escapeHtml(period.label)} · limits stored monthly, shown ${pWord}.</p>
+          ${totalSpentInBudget===0 && totalBudget>0 ? `<p class="text-sm text-muted mt-1">No spending hit these budget categories yet this ${pUnit} — fix categories in <button type="button" class="btn btn-secondary btn-sm" onclick="showSection('spending')">Spend → Review</button></p>` : ''}
         `;
       }
 
@@ -1906,9 +2046,9 @@
         const open = !!budgetExpanded[r.cat];
         let subHtml = '';
         if (open && canExpand) {
-          const subs = budgetSubBreakdown(r.cat, monthKey, f);
+          const subs = budgetSubBreakdown(r.cat, period, f);
           if (!subs.length) {
-            subHtml = `<div class="budget-sub"><p class="budget-sub-muted">Nothing tagged under ${escapeHtml(r.cat)} this month. Fix categories in Spend → Review, then come back.</p></div>`;
+            subHtml = `<div class="budget-sub"><p class="budget-sub-muted">Nothing tagged under ${escapeHtml(r.cat)} this ${pUnit}. Fix categories in Spend → Review, then come back.</p></div>`;
           } else {
             subHtml = `<div class="budget-sub"><p class="budget-sub-muted mb-2">Tap a transaction to edit / retag. Use Train rule for repeating merchants.</p>` + subs.map(s => {
               const share = r.spent > 0 ? ((s.amount / r.spent) * 100).toFixed(0) : '0';
@@ -1926,7 +2066,7 @@
         return `<div class="budget-row ${open?'open':''}" ${canExpand?`onclick="toggleBudgetRow('${r.cat.replace(/'/g, "\\'")}')"`:''}>
           <div class="flex justify-between items-center">
             <div class="list-item-title">${chev}${escapeHtml(r.cat)}</div>
-            <div class="text-sm"><strong>${formatAUD(r.spent)}</strong> <span class="text-muted">/ ${formatAUD(r.limit)}</span> <span class="pct">${r.pct.toFixed(0)}%</span></div>
+            <div class="text-sm"><strong>${formatAUD(r.spent)}</strong> <span class="text-muted">/ ${formatAUD(r.limit)} ${pUnit}</span> <span class="pct">${r.pct.toFixed(0)}%</span></div>
           </div>
           <div class="progress-wrap"><div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${Math.max(r.spent<=0?2:0, pctShow)}%"></div></div></div>
           <div class="text-sm text-muted mt-1">${status}${canExpand && !open ? ' · tap for breakdown' : ''}</div>
@@ -2152,29 +2292,48 @@
       saveData(); closeModal('transactionModal'); renderAll();
     }
 
+    function budgetEnterPeriodValue() {
+      const el = document.getElementById('budgetEnterPeriod');
+      return normalizeBudgetPeriod(el && el.value);
+    }
+    function fillBudgetModalInputs(ent) {
+      const period = budgetEnterPeriodValue();
+      const container = document.getElementById('budgetInputs');
+      const cats = data.categories.filter(c => c !== 'Income');
+      const pWord = periodWord(period);
+      container.innerHTML = cats.map(cat => {
+        const key = ent + '|' + cat;
+        const monthly = Number(data.budgets[key]) || 0;
+        const shown = monthly > 0 ? monthlyToPeriod(monthly, period) : 0;
+        const display = monthly > 0 ? (Math.round(shown * 100) / 100) : '';
+        return `<div class="form-group"><label>${escapeHtml(cat)} <span class="text-muted">(${pWord})</span></label><input type="number" data-cat="${cat}" data-monthly="${monthly}" data-shown="${display}" step="0.01" min="0" value="${display}" placeholder="0.00" /></div>`;
+      }).join('');
+    }
+    function refreshBudgetModalInputs() {
+      const entEl = document.getElementById('budgetEntity');
+      if (entEl) fillBudgetModalInputs(entEl.value);
+    }
     function openBudgetModal() {
       populateEntitySelects();
       if (data.settings.currentEntity !== 'all') document.getElementById('budgetEntity').value = data.settings.currentEntity;
-      const ent = document.getElementById('budgetEntity').value;
-      const container = document.getElementById('budgetInputs');
-      const cats = data.categories.filter(c => c !== 'Income');
-      container.innerHTML = cats.map(cat => {
-        const key = ent + '|' + cat;
-        return `<div class="form-group"><label>${escapeHtml(cat)}</label><input type="number" data-cat="${cat}" step="0.01" min="0" value="${data.budgets[key]||''}" placeholder="0.00" /></div>`;
-      }).join('');
-      document.getElementById('budgetEntity').onchange = () => {
-        const newEnt = document.getElementById('budgetEntity').value;
-        container.querySelectorAll('input').forEach(inp => { inp.value = data.budgets[newEnt+'|'+inp.dataset.cat] || ''; });
-      };
+      const enterSel = document.getElementById('budgetEnterPeriod');
+      if (enterSel) enterSel.value = getBudgetPeriod();
+      fillBudgetModalInputs(document.getElementById('budgetEntity').value);
+      document.getElementById('budgetEntity').onchange = () => fillBudgetModalInputs(document.getElementById('budgetEntity').value);
       document.getElementById('budgetModal').classList.add('open');
     }
     function saveBudgets(e) {
       e.preventDefault();
       const ent = document.getElementById('budgetEntity').value;
+      const period = budgetEnterPeriodValue();
       document.querySelectorAll('#budgetInputs input').forEach(inp => {
         const key = ent + '|' + inp.dataset.cat;
         const val = parseFloat(inp.value);
-        if (val > 0) data.budgets[key] = val; else delete data.budgets[key];
+        const shownOrig = parseFloat(inp.dataset.shown);
+        const monthlyOrig = parseFloat(inp.dataset.monthly);
+        if (!(val > 0)) delete data.budgets[key];
+        else if (!isNaN(shownOrig) && !isNaN(monthlyOrig) && monthlyOrig > 0 && Math.abs(val - shownOrig) < 0.005) data.budgets[key] = monthlyOrig;
+        else data.budgets[key] = periodToMonthly(val, period);
       });
       saveData(); closeModal('budgetModal'); renderAll();
     }
@@ -2308,7 +2467,8 @@
               onboardingDismissed: !!(parsed.settings && parsed.settings.onboardingDismissed),
               aiApiBase: (parsed.settings && parsed.settings.aiApiBase) || '',
               aiApiKey: (parsed.settings && parsed.settings.aiApiKey) || '',
-              aiModel: (parsed.settings && parsed.settings.aiModel) || 'gpt-4o-mini'
+              aiModel: (parsed.settings && parsed.settings.aiModel) || 'gpt-4o-mini',
+              budgetPeriod: normalizeBudgetPeriod(parsed.settings && parsed.settings.budgetPeriod)
             }
           };
           data.holdings.forEach(h => { if (!h.entityId) h.entityId = 'personal'; });
@@ -2348,7 +2508,7 @@
     }
     function clearAllData() {
       if (!confirm('Permanently delete all data?') || !confirm('Really sure?')) return;
-      data = { entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)), holdings: [], transactions: [], budgets: {}, accounts: [], budgetTraining: [], valueHistory: [], categories: [...DEFAULT_CATEGORIES], settings: { theme: data.settings.theme, currentEntity: 'all', onboardingDismissed: data.settings.onboardingDismissed, aiApiBase: data.settings.aiApiBase||'', aiApiKey: data.settings.aiApiKey||'', aiModel: data.settings.aiModel||'gpt-4o-mini' } };
+      data = { entities: JSON.parse(JSON.stringify(DEFAULT_ENTITIES)), holdings: [], transactions: [], budgets: {}, accounts: [], budgetTraining: [], valueHistory: [], categories: [...DEFAULT_CATEGORIES], settings: { theme: data.settings.theme, currentEntity: 'all', onboardingDismissed: data.settings.onboardingDismissed, aiApiBase: data.settings.aiApiBase||'', aiApiKey: data.settings.aiApiKey||'', aiModel: data.settings.aiModel||'gpt-4o-mini', budgetPeriod: normalizeBudgetPeriod(data.settings.budgetPeriod) } };
       saveData(); populateEntitySelects(); renderAll(); alert('All data cleared.');
     }
     function calcDCA() {
